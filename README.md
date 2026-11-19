@@ -1,79 +1,90 @@
+[![make.fun — GTA 6 Cover Art](https://make.fun/badge/gta6-cover-art-01.svg)](https://make.fun/c/gta6-cover-art-01)
+[![make.fun rank](https://make.fun/badge/gta6-cover-art-01/alvaschul/makefun-gta6-cover-art-01/rank.svg)](https://make.fun/c/gta6-cover-art-01)
+[![make.fun reward](https://make.fun/badge/gta6-cover-art-01/alvaschul/makefun-gta6-cover-art-01/reward.svg)](https://make.fun/c/gta6-cover-art-01)
+
 # VICE PANELS · Cover Studio
 
-[![make.fun · gta6-cover-art-01](https://make.fun/badge/gta6-cover-art-01.svg)](https://make.fun/bounty/gta6-cover-art-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-cover-art-01)
-[![rank](https://make.fun/badge/gta6-cover-art-01/alvaschul/makefun-gta6-cover-art-01/rank.svg)](https://make.fun/bounty/gta6-cover-art-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-cover-art-01)
-[![reward](https://make.fun/badge/gta6-cover-art-01/alvaschul/makefun-gta6-cover-art-01/reward.svg)](https://make.fun/bounty/gta6-cover-art-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-cover-art-01)
-
 A GTA 6-style cover art maker that runs entirely in the browser. Give it a
-photograph and a headline; it hands back a multi-panel, ink-outlined,
-sunset-graded magazine cover, ready to post. No accounts, no uploads, no
-build step — your photo never leaves the page.
-
-Built for the make.fun bounty **gta6-cover-art-01** ("Make GTA 6 Cover Art").
+photo and a caption and it hands back a multi-panel poster cover — your
+photo flattened into inked comic art, framed in heavy black panels, under
+a sunset-gradient masthead — exported as a PNG in the sizes social posts
+actually use. No uploads, no accounts, no network: your photos never
+leave your machine.
 
 ## Run it
 
-```sh
-node serve.ts            # serves app/ on http://localhost:8080
-# or: node serve.ts --port 4173
+Serve the `app/` folder with any static file server and open it in a
+desktop browser. The kit's own server is the shortest path:
+
+```
+node serve.ts
 ```
 
-Then open the page, pick a photo, and start shouting in headline form.
-
-To package the entry dossier exactly as the bounty grades it:
-
-```sh
-node main.ts                       # writes ./output/dossier.json
-MAKEFUN_OUTPUT_DIR=/tmp/out node main.ts
-```
+then open http://localhost:8080. That is the whole setup — there is no
+build step and nothing to install.
 
 ## What it does
 
-- **Photo in, three ways** — file picker, drag-and-drop onto the cover, or
-  two bundled samples (Boulevard, Pier).
-- **Poster pipeline** — the photo is posterized into flat ink bands,
-  outlined with Sobel edge ink and band-cliff strokes, screened with a
-  halftone dot pattern in the shadows, and finished with print grain and a
-  vignette. It reads as cover art, not as a filtered photo.
-- **Four color grades** — Vice Sunset (the flagship: indigo, magenta,
-  gold), Neon Rain, Midnight Cruise, and the faded Golden Hour '84.
-- **Four panel layouts** — Hero Strip, Quad Grid, Triptych and Front Page.
-  Every panel crops a different window of the same art and wears a rotated
-  tag chip ("VICE CITY", "THE GETAWAY", "ACT I"…).
-- **Full magazine furniture** — gradient Anton masthead with a Yellowtail
-  script flourish, issue line, starred cover lines, a starburst price
-  badge, a barcode that almost scans, and a caption bar along the foot.
-  Every word is editable.
-- **Post-ready sizes** — Portrait 4:5 (1080×1350), Square 1:1 (1080×1080)
-  and Story 9:16 (1080×1920), exported as a full-size PNG in one click.
+- **Any photo.** Use the two bundled samples (a boulevard and a pier,
+  made for this app), pick files from your machine, or drag photos
+  straight onto the cover. One photo can fill every panel, or several
+  photos can share the cover — click a panel to select it, click a photo
+  in the tray to place it there, drag on the cover to reframe, scroll or
+  use the slider to zoom.
+- **Inked poster art, not a filter.** Each photo is graded, posterized
+  into flat colour bands, and run through an edge pass that pulls its
+  outlines toward ink black, with a whisper of print grain over the top
+  (`app/src/poster.js`).
+- **Four colour grades.** Vice Sunset (the flagship magenta-to-tangerine
+  sunset), Neon Rain, Golden Hour and Midnight Chrome — each re-grades
+  the art, the sky, the masthead and the ink together
+  (`app/src/grades.js`).
+- **Six panel layouts.** Solo Splash, Split Duo, Top Story Trio, Four-Up
+  Grid, Vice Grid and Film Strips, each panel wearing its little rotated
+  tag — COVER STORY, EXCLUSIVE, FIRST LOOK (`app/src/layouts.js`).
+- **Real cover furniture.** A gradient Anton masthead with an ink stroke,
+  a Yellowtail script accent, editable title / accent / issue line /
+  cover lines, and a barcode in the corner for the magazine feel
+  (`app/src/cover.js`).
+- **Post sizes.** Square 1080×1080, portrait 1080×1350, wide 1920×1080
+  and story 1080×1920. The Export PNG button downloads the cover at full
+  size; the preview you have been editing is the same drawing the export
+  makes, so what you see is what you post.
 
-## Deterministic screenshots
+## Screenshots
 
-The scenes in `app/src/shots.js` are complete cover states addressed by
-URL — `app/?shot=1` … `?shot=4`. Cover scenes hide the studio chrome so a
-headless browser photographs the bare cover; `?shot=2` keeps the whole
-editor in frame. `shots.json` at the root is the manifest of the four
-renders in `screenshots/`, the first of which is the entry's cover.
+`screenshots/` holds four renders of the fixed scenes in
+`app/src/shots.js`: open the app with `?shot=1` … `?shot=4` to reproduce
+them exactly. `shots.json` lists each file with its caption and capture
+size. The first is a wide exported cover; the second is the editor with
+a photo loaded; the third and fourth are portrait and story covers.
 
-## Layout of the code
+## How it is put together
 
 | File | Job |
 | --- | --- |
-| `main.ts` | Entrypoint: copies `app/` + `screenshots/` to the output dir and writes `dossier.json` via the kit's `vendor/makefun-app.ts`. |
-| `serve.ts` | Tiny static server for `app/` (kit-provided). |
-| `app/src/main.js` | Studio state, controls, drag-and-drop, export, shot-mode boot. |
-| `app/src/cover.js` | Cover composition: panels, frames, masthead, badges, barcode, caption bar. |
-| `app/src/poster.js` | The posterize/ink/halftone/grain pipeline (seeded, deterministic). |
-| `app/src/grades.js` | The four color grades: ramps, ink, paper, pipeline knobs. |
-| `app/src/layouts.js` | Output sizes and the four panel layouts. |
-| `app/src/photos.js` | Photo sources: samples, file picker, drag-and-drop. |
-| `app/src/shots.js` | The four screenshot scenes. |
+| `app/index.html` | The page: top bar, control panel, stage. |
+| `app/style.css` | The studio's dark newsstand styling and the bundled fonts. |
+| `app/src/main.js` | Wiring: controls, photo tray, panel editing, export, shot scenes. |
+| `app/src/cover.js` | Composing a cover: panels, masthead, cover lines, barcode, PNG export. |
+| `app/src/poster.js` | The grade → posterize → ink → grain photo pipeline. |
+| `app/src/grades.js` | The four colour grades. |
+| `app/src/layouts.js` | The six panel layouts. |
+| `app/src/photos.js` | Sample photos and reading the visitor's own photos. |
+| `app/src/shots.js` | The deterministic `?shot=N` scenes behind the screenshots. |
+| `main.ts` | Hands the entry in: copies `app/` and `screenshots/` to the output directory and writes `dossier.json` with the kit's `buildDossier`. |
 
 ## Fonts
 
-Anton and Yellowtail are bundled as WOFF2 under `app/fonts/` and licensed
-under the SIL Open Font License 1.1 — see `app/fonts/OFL.txt`.
+The masthead face is Anton and the script accent is Yellowtail, both
+bundled under `app/fonts/` and both licensed under the SIL Open Font
+License 1.1 — see `app/fonts/OFL.txt`. Everything else about the app is
+original: no game artwork, logos or fonts are used anywhere.
 
-## License
+## Handing it in
 
-MIT — see `LICENSE`.
+```
+MAKEFUN_OUTPUT_DIR=out node main.ts
+```
+
+writes `out/app/`, `out/screenshots/` and `out/dossier.json`.

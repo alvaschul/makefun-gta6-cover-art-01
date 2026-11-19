@@ -1,243 +1,292 @@
-// main.js — the studio itself: state, controls, and the render loop.
+// main.js — wires the studio together: controls, canvas, photos, export.
 //
-// One state object describes the cover; every control edits it and asks
-// for a render, and cover.js does the drawing. Renders are scheduled on
-// the next animation frame so dragging through a text field does not
-// posterize the photograph thirty times a second (the art is cached
-// anyway — only the lettering is cheap enough to redraw freely).
-//
-// With ?shot=N in the URL the studio boots straight into one of shots.js's
-// scenes instead: cover scenes hide the chrome for a clean photograph of
-// the cover, the editor scene keeps everything on show.
+// The flow is deliberately short: pick a photo (or use a sample), pick a
+// grade and a layout, type your cover words, export the PNG. Panels can
+// be clicked to select them, dragged to reframe their photo, and filled
+// from the photo tray. In ?shot=N mode the studio applies one of the
+// fixed scenes from shots.js instead, so screenshots are reproducible.
 
-import { GRADES, gradeById } from './grades.js';
-import { LAYOUTS, SIZES, layoutById, sizeById } from './layouts.js';
-import { SAMPLES, loadSample, loadFromFile, dragHasPhoto, photoFromDrop } from './photos.js';
-import { drawCover, forgetArtwork } from './cover.js';
-import { sceneFromQuery } from './shots.js';
+import { GRADES } from './grades.js';
+import { LAYOUTS, layoutById } from './layouts.js';
+import { SAMPLES, isImageFile, loadFile, loadSample } from './photos.js';
+import { SIZES, createState, drawCover, exportPNG, panelAt, sizeById } from './cover.js';
+import { shotFromLocation } from './shots.js';
 
-const canvas = document.getElementById('cover');
-const stage = document.getElementById('stage');
-const statusLine = document.getElementById('statusLine');
-const photoLabel = document.getElementById('photoLabel');
+const state = createState();
+const $ = (id) => document.getElementById(id);
+const canvas = $('cover');
+const ctx = canvas.getContext('2d');
 
-const state = {
-  image: null,
-  photoKey: 'sample:boulevard',
-  gradeId: 'vice-sunset',
-  layoutId: 'hero-strip',
-  sizeId: 'portrait',
-  title: 'VICE PANELS',
-  script: 'Cover Studio',
-  caption: 'THE CITY IS YOURS — MIND THE PARKING',
-  lines: ['25 PAGES OF NEON', 'THE HEAT IS ON: A FIELD GUIDE', 'PLUS: BOATS, BADGES & BETRAYAL'],
-  issue: 'Nº 06',
-  price: '$6.66',
-};
+const shot = shotFromLocation();
+let samplePhotos = {}; // sample id -> photo, once loaded
 
-let renderQueued = false;
+function ensurePanelArrays() {
+  const count = layoutById(state.layoutId).panels.length;
+  while (state.panelPhoto.length < count) {
+    const next = state.photos.length ? state.panelPhoto.length % state.photos.length : 0;
+    state.panelPhoto.push(next);
+  }
+  while (state.pans.length < count) state.pans.push({ x: 0, y: 0, zoom: 1 });
+  if (state.selectedPanel >= count) state.selectedPanel = 0;
+}
+
 function render() {
-  if (renderQueued) return;
-  renderQueued = true;
-  requestAnimationFrame(() => {
-    renderQueued = false;
-    if (!state.image) return;
-    drawCover(canvas, state);
-    const size = sizeById(state.sizeId);
-    statusLine.textContent =
-      `${size.width} × ${size.height} · ${gradeById(state.gradeId).name} · ${layoutById(state.layoutId).name}`;
+  ensurePanelArrays();
+  const size = sizeById(state.sizeId);
+  if (canvas.width !== size.w) canvas.width = size.w;
+  if (canvas.height !== size.h) canvas.height = size.h;
+  const inShotCover = shot && shot.mode === 'cover';
+  drawCover(ctx, state, { highlight: inShotCover ? null : state.selectedPanel });
+  syncTray();
+  const zoom = $('zoom');
+  if (zoom) zoom.value = String(state.pans[state.selectedPanel]?.zoom ?? 1);
+}
+
+// ---------------------------------------------------------------- controls
+
+function segmented(container, items, current, onPick, renderButton) {
+  container.innerHTML = '';
+  for (const item of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'seg' + (item.id === current ? ' active' : '');
+    b.dataset.id = item.id;
+    renderButton(b, item);
+    b.addEventListener('click', () => onPick(item.id));
+    container.appendChild(b);
+  }
+}
+
+function buildControls() {
+  segmented($('layoutBtns'), LAYOUTS, state.layoutId, (id) => {
+    state.layoutId = id;
+    buildControls();
+    render();
+  }, (b, item) => {
+    b.textContent = item.name;
+    b.title = `${item.panels.length} panel${item.panels.length > 1 ? 's' : ''}`;
+  });
+
+  segmented($('gradeBtns'), GRADES, state.gradeId, (id) => {
+    state.gradeId = id;
+    buildControls();
+    render();
+  }, (b, item) => {
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    sw.style.background = `linear-gradient(180deg, ${item.sky.join(', ')})`;
+    const label = document.createElement('span');
+    label.textContent = item.name;
+    b.append(sw, label);
+    b.title = item.blurb;
+  });
+
+  segmented($('sizeBtns'), SIZES, state.sizeId, (id) => {
+    state.sizeId = id;
+    buildControls();
+    render();
+  }, (b, item) => {
+    b.textContent = `${item.name} · ${item.w}×${item.h}`;
   });
 }
 
-/** Point the studio at a new photograph and render with it. */
-async function setPhoto(image, key, label) {
-  state.image = image;
-  state.photoKey = key;
-  forgetArtwork();
-  photoLabel.textContent = label;
-  render();
+function syncTray() {
+  const tray = $('tray');
+  tray.innerHTML = '';
+  state.photos.forEach((photo, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'thumb' + (state.panelPhoto[state.selectedPanel] === i ? ' active' : '');
+    const img = document.createElement('img');
+    img.src = photo.img.src;
+    img.alt = '';
+    const label = document.createElement('span');
+    label.textContent = photo.name;
+    b.append(img, label);
+    b.title = `Put ${photo.name} in the selected panel`;
+    b.addEventListener('click', () => {
+      state.panelPhoto[state.selectedPanel] = i;
+      render();
+    });
+    tray.appendChild(b);
+  });
+  const hint = $('panelHint');
+  if (hint) {
+    hint.textContent = state.photos.length
+      ? `Panel ${state.selectedPanel + 1} of ${layoutById(state.layoutId).panels.length} — drag the cover to reframe it, scroll to zoom.`
+      : 'Add a photo to begin.';
+  }
 }
 
-// ------------------------------------------------------------------ chips
-
-/**
- * Build a radiogroup of chip buttons into `host`. `options` are
- * { id, name, blurb? }; `current` is the selected id; `onPick(id)` fires
- * on selection. Chips are real buttons: tab reaches the group, arrows
- * move within it, space and enter choose.
- */
-function buildChips(host, options, current, onPick) {
-  host.replaceChildren();
-  options.forEach((option) => {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip';
-    chip.dataset.id = option.id;
-    chip.setAttribute('role', 'radio');
-    chip.setAttribute('aria-checked', String(option.id === current));
-    if (option.id === current) chip.classList.add('on');
-    const name = document.createElement('span');
-    name.className = 'chip-name';
-    name.textContent = option.name;
-    chip.append(name);
-    if (option.blurb) {
-      const blurb = document.createElement('span');
-      blurb.className = 'chip-blurb';
-      blurb.textContent = option.blurb;
-      chip.append(blurb);
+async function addFiles(files) {
+  for (const file of files) {
+    if (!isImageFile(file)) continue;
+    try {
+      const photo = await loadFile(file);
+      state.photos.push(photo);
+      state.panelPhoto[state.selectedPanel] = state.photos.length - 1;
+    } catch {
+      /* a file we cannot read is simply not added */
     }
-    chip.addEventListener('click', () => selectChip(host, chip, onPick));
-    host.append(chip);
-  });
-  host.addEventListener('keydown', (event) => {
-    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft' && event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-    const chips = [...host.querySelectorAll('.chip')];
-    const at = chips.indexOf(document.activeElement);
-    if (at < 0) return;
-    event.preventDefault();
-    const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
-    const next = chips[(at + step + chips.length) % chips.length];
-    next.focus();
-    selectChip(host, next, onPick);
-  });
-}
-
-function selectChip(host, chip, onPick) {
-  host.querySelectorAll('.chip').forEach((other) => {
-    other.classList.toggle('on', other === chip);
-    other.setAttribute('aria-checked', String(other === chip));
-  });
-  onPick(chip.dataset.id);
-}
-
-/** Mark the chip for `id` selected without firing the pick handler. */
-function syncChips(host, id) {
-  host.querySelectorAll('.chip').forEach((chip) => {
-    chip.classList.toggle('on', chip.dataset.id === id);
-    chip.setAttribute('aria-checked', String(chip.dataset.id === id));
-  });
-}
-
-// ------------------------------------------------------------------ build
-
-const gradeChips = document.getElementById('gradeChips');
-const layoutChips = document.getElementById('layoutChips');
-const sizeChips = document.getElementById('sizeChips');
-const sampleButtons = document.getElementById('sampleButtons');
-
-buildChips(gradeChips, GRADES, state.gradeId, (id) => { state.gradeId = id; render(); });
-buildChips(layoutChips, LAYOUTS, state.layoutId, (id) => { state.layoutId = id; render(); });
-buildChips(sizeChips, SIZES.map((s) => ({ id: s.id, name: s.name, blurb: s.use })), state.sizeId,
-  (id) => { state.sizeId = id; render(); });
-
-SAMPLES.forEach((sample) => {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'sample-btn';
-  button.textContent = sample.name;
-  button.addEventListener('click', async () => {
-    const image = await loadSample(sample.id);
-    setPhoto(image, `sample:${sample.id}`, `Sample — ${sample.name}`);
-  });
-  sampleButtons.append(button);
-});
-
-document.getElementById('photoFile').addEventListener('change', async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const { image, id, label } = await loadFromFile(file);
-  setPhoto(image, id, label);
-});
-
-stage.addEventListener('dragover', (event) => {
-  if (!dragHasPhoto(event)) return;
-  event.preventDefault();
-  stage.classList.add('dropping');
-});
-stage.addEventListener('dragleave', () => stage.classList.remove('dropping'));
-stage.addEventListener('drop', async (event) => {
-  event.preventDefault();
-  stage.classList.remove('dropping');
-  const file = photoFromDrop(event);
-  if (!file) return;
-  const { image, id, label } = await loadFromFile(file);
-  setPhoto(image, id, label);
-});
-
-// ------------------------------------------------------------------ texts
-
-const textFields = [
-  ['titleInput', 'title'],
-  ['scriptInput', 'script'],
-  ['captionInput', 'caption'],
-  ['issueInput', 'issue'],
-  ['priceInput', 'price'],
-];
-for (const [id, key] of textFields) {
-  const input = document.getElementById(id);
-  input.value = state[key];
-  input.addEventListener('input', () => { state[key] = input.value; render(); });
-}
-const linesInput = document.getElementById('linesInput');
-linesInput.value = state.lines.join('\n');
-linesInput.addEventListener('input', () => {
-  state.lines = linesInput.value.split('\n');
+  }
   render();
-});
+}
 
-document.getElementById('exportBtn').addEventListener('click', () => {
-  canvas.toBlob((blob) => {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `vice-panels-${state.sizeId}.png`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-  }, 'image/png');
-});
-
-// ------------------------------------------------------------------ boot
-
-/** Push a shots.js scene into the state and the form, for ?shot=N boots. */
-function applyScene(scene) {
-  Object.assign(state, {
-    gradeId: scene.state.gradeId,
-    layoutId: scene.state.layoutId,
-    sizeId: scene.state.sizeId,
-    title: scene.state.title,
-    script: scene.state.script,
-    caption: scene.state.caption,
-    lines: [...scene.state.lines],
-    issue: scene.state.issue,
-    price: scene.state.price,
+function bindInputs() {
+  $('fileInput').addEventListener('change', (e) => {
+    addFiles([...e.target.files]);
+    e.target.value = '';
   });
-  syncChips(gradeChips, state.gradeId);
-  syncChips(layoutChips, state.layoutId);
-  syncChips(sizeChips, state.sizeId);
-  for (const [id, key] of textFields) document.getElementById(id).value = state[key];
-  linesInput.value = state.lines.join('\n');
-  document.body.classList.add(scene.mode === 'cover' ? 'shot-cover' : 'shot-editor');
-  return scene.state.photo;
+  for (const b of document.querySelectorAll('[data-sample]')) {
+    b.addEventListener('click', () => {
+      const photo = samplePhotos[b.dataset.sample];
+      if (!photo) return;
+      if (!state.photos.includes(photo)) state.photos.push(photo);
+      state.panelPhoto[state.selectedPanel] = state.photos.indexOf(photo);
+      render();
+    });
+  }
+  const bindText = (id, apply) => {
+    $(id).addEventListener('input', (e) => {
+      apply(e.target.value);
+      render();
+    });
+  };
+  bindText('titleInput', (v) => (state.title = v));
+  bindText('accentInput', (v) => (state.accent = v));
+  bindText('issueInput', (v) => (state.issue = v));
+  bindText('linesInput', (v) => (state.lines = v.split('\n')));
+  $('zoom').addEventListener('input', (e) => {
+    const pan = state.pans[state.selectedPanel];
+    if (pan) pan.zoom = Number(e.target.value);
+    render();
+  });
+  $('resetPan').addEventListener('click', () => {
+    state.pans[state.selectedPanel] = { x: 0, y: 0, zoom: 1 };
+    render();
+  });
+  $('exportBtn').addEventListener('click', async () => {
+    const blob = await exportPNG(state);
+    if (!blob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'vice-panels-cover.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  });
+
+  const stage = $('stage');
+  stage.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    stage.classList.add('dropping');
+  });
+  stage.addEventListener('dragleave', () => stage.classList.remove('dropping'));
+  stage.addEventListener('drop', (e) => {
+    e.preventDefault();
+    stage.classList.remove('dropping');
+    addFiles([...e.dataTransfer.files]);
+  });
+}
+
+function bindCanvas() {
+  let drag = null;
+  const toCover = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const size = sizeById(state.sizeId);
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * size.w,
+      y: ((e.clientY - rect.top) / rect.height) * size.h,
+      dx: (e.movementX / rect.width) * size.w,
+      dy: (e.movementY / rect.height) * size.h,
+    };
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    const p = toCover(e);
+    const size = sizeById(state.sizeId);
+    const hit = panelAt(state, size.w, size.h, p.x, p.y);
+    if (hit >= 0) state.selectedPanel = hit;
+    drag = { x: p.x, y: p.y };
+    canvas.setPointerCapture(e.pointerId);
+    render();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const p = toCover(e);
+    const pan = state.pans[state.selectedPanel];
+    if (pan) {
+      pan.x = Math.max(-1, Math.min(1, pan.x - p.dx * 0.004));
+      pan.y = Math.max(-1, Math.min(1, pan.y - p.dy * 0.004));
+    }
+    drag = { x: p.x, y: p.y };
+    render();
+  });
+  const end = () => (drag = null);
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const pan = state.pans[state.selectedPanel];
+    if (!pan) return;
+    pan.zoom = Math.max(1, Math.min(3, pan.zoom * (e.deltaY < 0 ? 1.08 : 0.92)));
+    render();
+  }, { passive: false });
+}
+
+// ---------------------------------------------------------------- scenes
+
+function applyScene(scene) {
+  state.sizeId = scene.sizeId;
+  state.gradeId = scene.gradeId;
+  state.layoutId = scene.layoutId;
+  state.title = scene.title;
+  state.accent = scene.accent;
+  state.issue = scene.issue;
+  state.lines = [...scene.lines];
+  state.panelPhoto = scene.photoIds.map((id) => {
+    const photo = samplePhotos[id];
+    return photo ? state.photos.indexOf(photo) : 0;
+  });
+  state.pans = scene.photoIds.map(() => ({ x: 0, y: 0, zoom: 1 }));
+  state.selectedPanel = 0;
+  if (scene.mode === 'cover') document.body.classList.add('shot');
+  // Reflect the scene in the (possibly hidden) controls.
+  $('titleInput').value = state.title;
+  $('accentInput').value = state.accent;
+  $('issueInput').value = state.issue;
+  $('linesInput').value = state.lines.join('\n');
+  buildControls();
 }
 
 async function boot() {
-  const scene = sceneFromQuery(location.search);
-  const sampleId = scene ? applyScene(scene) : 'boulevard';
+  buildControls();
+  bindInputs();
+  bindCanvas();
   try {
-    await Promise.race([
-      Promise.all([document.fonts.load('100px Anton'), document.fonts.load('100px Yellowtail')]),
-      new Promise((resolve) => setTimeout(resolve, 2500)),
-    ]);
-  } catch { /* lettering falls back to system fonts, still fine */ }
-  const image = await loadSample(sampleId);
-  await setPhoto(image, `sample:${sampleId}`, `Sample — ${sampleId}`);
-  document.fonts?.ready.then(() => render());
-  if (scene) {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.documentElement.dataset.shotReady = '1';
-    }));
+    const loaded = await Promise.all(SAMPLES.map((s) => loadSample(s)));
+    loaded.forEach((photo, i) => {
+      samplePhotos[SAMPLES[i].id] = photo;
+    });
+    state.photos = [samplePhotos.boulevard, samplePhotos.pier];
+    state.panelPhoto = [0, 1, 0, 1];
+  } catch {
+    /* samples missing: the studio still opens, waiting for a photo */
   }
+  if (shot) applyScene(shot);
+  ensurePanelArrays();
+  render();
+  try {
+    await Promise.all([
+      document.fonts.load('100px Anton'),
+      document.fonts.load('100px Yellowtail'),
+      document.fonts.ready,
+    ]);
+  } catch {
+    /* fonts fall back to system faces; the render below still runs */
+  }
+  render();
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    window.__shotReady = true;
+  }));
 }
 
 boot();

@@ -1,64 +1,46 @@
-// photos.js — where cover photographs come from.
+// photos.js — where a cover's photographs come from.
 //
-// Three doors in: the two sample photographs bundled with the app, a file
-// the reader picks, and a file the reader drops on the stage. Every door
-// hands back a loaded HTMLImageElement; object URLs are kept alive for the
-// session (a cover may be re-rendered many times) and same-origin sample
-// loads are cached so switching back and forth is instant.
+// Two sample photos ship with the app (made for it, free to use); the
+// person's own photos arrive through the file picker or drag-and-drop and
+// are read on their own machine only — nothing is ever uploaded.
 
-/** The bundled sample photographs, paths relative to app/. */
 export const SAMPLES = [
-  { id: 'boulevard', name: 'Boulevard', src: 'samples/boulevard.jpg' },
-  { id: 'pier', name: 'Pier', src: 'samples/pier.jpg' },
+  { id: 'boulevard', src: 'samples/boulevard.jpg', name: 'Boulevard' },
+  { id: 'pier', src: 'samples/pier.jpg', name: 'Pier' },
 ];
 
-const sampleMap = new Map(SAMPLES.map((sample) => [sample.id, sample]));
+let counter = 0;
 
-/** The sample with this id, or the first sample when the id is unknown. */
-export function sampleById(id) {
-  return sampleMap.get(id) ?? SAMPLES[0];
+function toPhoto(img, id, name) {
+  return { id, img, name, w: img.naturalWidth, h: img.naturalHeight };
 }
 
-const cache = new Map();
-
-/** Load an image from a URL, remembering it by URL for the session. */
-export function loadFromUrl(src) {
-  if (cache.has(src)) return cache.get(src);
-  const pending = new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`could not load ${src}`));
-    image.src = src;
+export function loadSample(sample) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(toPhoto(img, `sample-${sample.id}`, sample.name));
+    img.onerror = () => reject(new Error(`could not load ${sample.src}`));
+    img.src = sample.src;
   });
-  cache.set(src, pending);
-  return pending;
 }
 
-/** Load one of the bundled sample photographs by id. */
-export function loadSample(id) {
-  return loadFromUrl(sampleById(id).src);
+export function loadFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      counter += 1;
+      const name = file.name.replace(/\.[^.]+$/, '') || 'My photo';
+      resolve(toPhoto(img, `file-${counter}`, name));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`could not read ${file.name}`));
+    };
+    img.src = url;
+  });
 }
 
-/**
- * Load a photograph from a reader-picked file. Resolves with
- * { image, id } where the id names the file so the UI can label it.
- */
-export function loadFromFile(file) {
-  const src = URL.createObjectURL(file);
-  return loadFromUrl(src).then((image) => ({
-    image,
-    id: `file:${file.name}`,
-    label: file.name,
-  }));
-}
-
-/** Whether a drag event is carrying files the stage should accept. */
-export function dragHasPhoto(event) {
-  return [...(event.dataTransfer?.types ?? [])].includes('Files');
-}
-
-/** The first image file in a drop, or null when the drop holds none. */
-export function photoFromDrop(event) {
-  const files = [...(event.dataTransfer?.files ?? [])];
-  return files.find((file) => file.type.startsWith('image/')) ?? files[0] ?? null;
+export function isImageFile(file) {
+  return file && typeof file.type === 'string' && file.type.startsWith('image/');
 }

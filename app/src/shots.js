@@ -1,95 +1,61 @@
-// shots.js — the deterministic scenes behind the entry's screenshots.
+// shots.js — the deterministic scenes behind ?shot=1..4.
 //
-// Each scene is a complete cover state (photo, grade, layout, size and
-// every line of lettering) addressed by ?shot=N. In shot mode the studio
-// applies the scene, hides its chrome for cover scenes, and flags the
-// document ready once the render is on screen, so a headless browser can
-// photograph the exact same cover every time. The editor scene keeps the
-// full studio visible: it is the "how it is made" shot.
-//
-// The same table drives shots.json at the repository root: file names and
-// captions here are the ones the manifest publishes.
+// The screenshots in screenshots/ are renders of these scenes, so anyone
+// can reproduce them exactly: each scene names its sample photo, grade,
+// layout, output size and cover words, and main.js applies them verbatim.
+// Shot 2 is the editor itself, controls and all, with a photo loaded;
+// the others are cover-only, the app chrome hidden.
 
-export const SHOTS = [
-  {
-    n: 1,
-    file: '1-cover.jpg',
+export const SHOT_SCENES = {
+  1: {
     mode: 'cover',
-    caption: 'The cover: boulevard photo, Vice Sunset grade, Hero Strip layout, story size.',
-    state: {
-      photo: 'boulevard',
-      gradeId: 'vice-sunset',
-      layoutId: 'hero-strip',
-      sizeId: 'story',
-      title: 'VICE PANELS',
-      script: 'Cover Studio',
-      caption: 'THE CITY IS YOURS — MIND THE PARKING',
-      lines: ['25 PAGES OF NEON', 'THE HEAT IS ON: A FIELD GUIDE', 'PLUS: BOATS, BADGES & BETRAYAL'],
-      issue: 'Nº 06',
-      price: '$6.66',
-    },
+    sizeId: 'landscape',
+    gradeId: 'vice',
+    layoutId: 'vice-grid',
+    photoIds: ['boulevard', 'pier', 'boulevard'],
+    title: 'VICE PANELS',
+    accent: 'cover studio',
+    issue: 'VOL. 01 · THE SUNSET ISSUE',
+    lines: ['10 best getaway rides, ranked', 'Neon nights: the city after dark'],
   },
-  {
-    n: 2,
-    file: '2-editor.jpg',
+  2: {
     mode: 'editor',
-    caption: 'The studio: photo, grade, layout, size and lettering controls beside the live cover.',
-    state: {
-      photo: 'pier',
-      gradeId: 'vice-sunset',
-      layoutId: 'quad-grid',
-      sizeId: 'portrait',
-      title: 'VICE PANELS',
-      script: 'Cover Studio',
-      caption: 'EVERY SUNSET HAS A BODY COUNT',
-      lines: ['THE PIER AT MIDNIGHT', 'CONFESSIONS OF A GETAWAY DRIVER', 'WIN A JET SKI (PROBABLY)'],
-      issue: 'Nº 06',
-      price: '$6.66',
-    },
+    sizeId: 'portrait',
+    gradeId: 'neon',
+    layoutId: 'trio',
+    photoIds: ['pier', 'boulevard', 'pier'],
+    title: 'VICE PANELS',
+    accent: 'cover studio',
+    issue: 'VOL. 01 · THE SUNSET ISSUE',
+    lines: ['10 best getaway rides, ranked', 'Neon nights: the city after dark', 'Meet the crew everyone fears'],
   },
-  {
-    n: 3,
-    file: '3-cover.jpg',
+  3: {
     mode: 'cover',
-    caption: 'Pier photo under Neon Rain, Triptych layout, portrait size.',
-    state: {
-      photo: 'pier',
-      gradeId: 'neon-rain',
-      layoutId: 'triptych',
-      sizeId: 'portrait',
-      title: 'NEON HARBOR',
-      script: 'after dark',
-      caption: 'THREE LIVES, ONE STORM',
-      lines: ['THE DOCKS NEVER SLEEP', 'A LOVE LETTER IN ULTRAVIOLET', 'PLUS: THE TIDE CHART OF CRIME'],
-      issue: 'Nº 13',
-      price: '$7.77',
-    },
+    sizeId: 'portrait',
+    gradeId: 'golden',
+    layoutId: 'trio',
+    photoIds: ['pier', 'boulevard', 'pier'],
+    title: 'VICE PANELS',
+    accent: 'golden hour',
+    issue: 'VOL. 02 · THE GOLDEN ISSUE',
+    lines: ['Harbour lights and high tides', 'The pier at closing time'],
   },
-  {
-    n: 4,
-    file: '4-cover.jpg',
+  4: {
     mode: 'cover',
-    caption: "Boulevard photo under Golden Hour '84, Front Page layout, square size.",
-    state: {
-      photo: 'boulevard',
-      gradeId: 'golden-hour-84',
-      layoutId: 'front-page',
-      sizeId: 'square',
-      title: 'SUNSET GAZETTE',
-      script: 'est. 1984',
-      caption: 'ALL THE NEWS THAT FITS THE SUNSET',
-      lines: ['EXTRA: THE BOULEVARD BURNS GOLD', 'MARKETS UP, MERCURY DOWN', 'SPORT: PALMS 4 — HURRICANES 2'],
-      issue: 'Nº 84',
-      price: '$0.84',
-    },
+    sizeId: 'story',
+    gradeId: 'neon',
+    layoutId: 'strips',
+    photoIds: ['boulevard', 'pier', 'boulevard'],
+    title: 'VICE PANELS',
+    accent: 'after dark',
+    issue: 'VOL. 03 · THE MIDNIGHT ISSUE',
+    lines: ['Three acts, one long night'],
   },
-];
+};
 
-const shotByNumber = new Map(SHOTS.map((shot) => [shot.n, shot]));
-
-/** The scene for ?shot=N, or null when the URL names no scene. */
-export function sceneFromQuery(search) {
-  const raw = new URLSearchParams(search).get('shot');
-  if (raw === null) return null;
-  return shotByNumber.get(Number(raw)) ?? null;
+export function shotFromLocation() {
+  const raw = new URLSearchParams(window.location.search).get('shot');
+  if (!raw) return null;
+  const scene = SHOT_SCENES[raw];
+  return scene ? { id: raw, ...scene } : null;
 }

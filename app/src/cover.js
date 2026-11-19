@@ -1,313 +1,330 @@
-// cover.js — composes a finished cover from poster art and lettering.
+// cover.js — composes a finished cover from photos, a grade and a layout.
 //
-// The recipe, back to front: ink-black page, the layout's panels filled
-// with differently-cropped windows of the same poster art, heavy ink
-// frames with a paper keyline, a tagged chip on every panel, then the
-// magazine furniture — masthead, script flourish, cover lines, price
-// burst, barcode and the caption bar along the foot.
-//
-// The poster art is the expensive layer, so it is cached per photo +
-// grade + size; changing a headline never re-posterizes the photograph.
+// The recipe, back to front: an ink ground, a sunset band with the sun
+// behind the masthead, the posterized panels in their ink frames with
+// their little tags, the cover lines on ink chips, the big gradient
+// masthead with its script accent, a barcode in the corner, and a
+// vignette to seat it all. The editor preview and the PNG export draw
+// through this same function, so what you see is exactly what you share.
 
-import { gradeById, inkCss, paperCss } from './grades.js';
-import { layoutById, sizeById } from './layouts.js';
-import { makeArtwork, seededRandom } from './poster.js';
+import { gradeById } from './grades.js';
+import { layoutById, panelRects } from './layouts.js';
+import { drawCoverFit, makeCanvas, processPhoto } from './poster.js';
 
-const DISPLAY = `'Anton', 'Arial Narrow', sans-serif`;
-const SCRIPT = `'Yellowtail', cursive`;
+export const SIZES = [
+  { id: 'square', name: 'Square post', w: 1080, h: 1080 },
+  { id: 'portrait', name: 'Portrait post', w: 1080, h: 1350 },
+  { id: 'landscape', name: 'Wide post', w: 1920, h: 1080 },
+  { id: 'story', name: 'Story', w: 1080, h: 1920 },
+];
 
-const artworkCache = new Map();
-
-/** The poster art for a state, built once and then reused. */
-function artworkFor(state, width, height) {
-  const key = `${state.photoKey}|${state.gradeId}|${width}x${height}`;
-  if (!artworkCache.has(key)) {
-    artworkCache.set(key, makeArtwork(state.image, gradeById(state.gradeId), width, height));
-  }
-  return artworkCache.get(key);
+export function sizeById(id) {
+  return SIZES.find((s) => s.id === id) ?? SIZES[1];
 }
 
-/** Drop every cached artwork (a new photograph makes them all stale). */
-export function forgetArtwork() {
-  artworkCache.clear();
+export const DEFAULT_LINES = [
+  '10 best getaway rides, ranked',
+  'Neon nights: the city after dark',
+  'Meet the crew everyone fears',
+];
+
+export function createState() {
+  return {
+    sizeId: 'portrait',
+    gradeId: 'vice',
+    layoutId: 'trio',
+    photos: [],
+    panelPhoto: [],
+    pans: [],
+    selectedPanel: 0,
+    title: 'VICE PANELS',
+    accent: 'cover studio',
+    lines: [...DEFAULT_LINES],
+    issue: 'VOL. 01 · THE SUNSET ISSUE',
+    price: 'No. 01 — $9.99',
+  };
 }
 
-/** Set the font to `family` at the largest size ≤ startSize that fits maxWidth; returns the size used. */
-function fitFont(ctx, text, family, startSize, maxWidth) {
-  let size = startSize;
-  while (size > 10) {
-    ctx.font = `${size}px ${family}`;
-    if (ctx.measureText(text).width <= maxWidth) break;
-    size = Math.floor(size * 0.94);
+// The area the panels tile: full-bleed sides, room at the top for the
+// masthead to overlap, a margin at the bottom for the cover lines.
+export function coverArea(w, h) {
+  const mx = Math.round(w * 0.038);
+  const top = Math.round(h * 0.148);
+  const bottom = Math.round(h * 0.03);
+  return { x: mx, y: top, w: w - mx * 2, h: h - top - bottom };
+}
+
+export function rectsFor(state, w, h) {
+  const gutter = Math.max(8, Math.round(w * 0.014));
+  return panelRects(layoutById(state.layoutId), coverArea(w, h), gutter);
+}
+
+export function panelAt(state, w, h, x, y) {
+  const rects = rectsFor(state, w, h);
+  for (let i = rects.length - 1; i >= 0; i--) {
+    const r = rects[i];
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
   }
+  return -1;
+}
+
+function photoForPanel(state, index) {
+  if (state.photos.length === 0) return null;
+  const pick = state.panelPhoto[index] ?? index;
+  return state.photos[pick % state.photos.length];
+}
+
+function panForPanel(state, index) {
+  return state.pans[index] ?? { x: 0, y: 0, zoom: 1 };
+}
+
+function fitFontSize(ctx, text, maxWidth, start, family) {
+  let size = start;
   ctx.font = `${size}px ${family}`;
+  while (ctx.measureText(text).width > maxWidth && size > 8) {
+    size *= 0.95;
+    ctx.font = `${size}px ${family}`;
+  }
   return size;
 }
 
-/** Stroke-then-fill a line of text so it stays readable over busy art. */
-function inkedText(ctx, text, x, y, fill) {
-  ctx.strokeStyle = 'rgba(8, 6, 18, 0.9)';
-  ctx.lineWidth = Math.max(3, ctx.measureText(text).width * 0.012);
-  ctx.lineJoin = 'round';
-  ctx.strokeText(text, x, y);
-  ctx.fillStyle = fill;
-  ctx.fillText(text, x, y);
-}
-
-function drawPanel(ctx, artwork, panel, rect, grade, index, coverW, coverH) {
-  const { x, y, w, h } = rect;
-  drawPanelArt(ctx, artwork, panel, rect);
-  // Frame: a heavy ink rule, then a hairline of paper inside it.
-  const rule = Math.max(5, coverW * 0.006);
-  ctx.strokeStyle = inkCss(grade);
-  ctx.lineWidth = rule;
-  ctx.strokeRect(x, y, w, h);
-  ctx.strokeStyle = paperCss(grade);
+function drawSkyBand(ctx, grade, w, bandH) {
+  const grad = ctx.createLinearGradient(0, 0, 0, bandH * 1.6);
+  grade.sky.forEach((stop, i) => grad.addColorStop(i / (grade.sky.length - 1), stop));
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, bandH);
+  // The sun, low and huge, sitting behind the masthead.
+  const sunR = w * 0.085;
+  const sunX = w * 0.815;
+  const sunY = bandH * 0.58;
+  const glow = ctx.createRadialGradient(sunX, sunY, sunR * 0.2, sunX, sunY, sunR * 2.6);
+  glow.addColorStop(0, grade.sun);
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.globalAlpha = 0.55;
-  ctx.lineWidth = Math.max(1.5, rule * 0.22);
-  ctx.strokeRect(x + rule, y + rule, w - rule * 2, h - rule * 2);
+  ctx.fillStyle = glow;
+  ctx.fillRect(sunX - sunR * 2.6, sunY - sunR * 2.6, sunR * 5.2, sunR * 5.2);
   ctx.globalAlpha = 1;
-  drawTag(ctx, panel.tag, rect, grade, index, coverW, coverH);
-}
-
-function drawPanelArt(ctx, artwork, panel, rect) {
-  const { x, y, w, h } = rect;
-  // The source window keeps the panel's aspect, sized by the zoom, and is
-  // centered on the focal point, clamped to the artwork's edges.
-  const aspect = w / h;
-  let sW = artwork.width / panel.zoom;
-  let sH = sW / aspect;
-  if (sH > artwork.height / panel.zoom) {
-    sH = artwork.height / panel.zoom;
-    sW = sH * aspect;
-  }
-  if (sW > artwork.width) { sW = artwork.width; sH = sW / aspect; }
-  if (sH > artwork.height) { sH = artwork.height; sW = sH * aspect; }
-  const sx = Math.max(0, Math.min(artwork.width - sW, panel.focalX * artwork.width - sW / 2));
-  const sy = Math.max(0, Math.min(artwork.height - sH, panel.focalY * artwork.height - sH / 2));
-  ctx.save();
+  ctx.fillStyle = grade.sun;
   ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  ctx.drawImage(artwork, sx, sy, sW, sH, x, y, w, h);
-  ctx.restore();
+  ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-/**
- * A small rotated ink chip naming the panel. Placement dodges the
- * cover's furniture: ordinary panels wear it top-left; top-row panels
- * hang it along their bottom edge (right side, or left when the panel
- * spans the cover and the price burst holds the right); and a panel
- * that runs the full height of the cover drops it below the masthead
- * instead, where the caption bar cannot swallow it.
- */
-function drawTag(ctx, tag, rect, grade, index, coverW, coverH) {
-  if (!tag) return;
-  const size = Math.max(13, coverW * 0.02);
+function drawPanelTag(ctx, grade, rect, h) {
+  if (!rect.tag || rect.h < h * 0.14 || rect.w < 90) return;
+  const size = Math.max(11, Math.round(h * 0.019));
   ctx.save();
-  ctx.font = `${size}px ${DISPLAY}`;
-  const w = ctx.measureText(tag).width + size * 1.1;
-  const h = size * 1.62;
-  const inset = coverW * 0.016;
-  const topRow = rect.y <= coverW * 0.02;
-  const fullHeight = rect.y + rect.h > coverH * 0.88;
-  const fullWidth = rect.w > coverW * 0.9;
-  let tx = rect.x + inset;
-  let ty = rect.y + inset;
-  if (topRow && fullHeight) {
-    ty = coverH * 0.25;
-  } else if (topRow && fullWidth) {
-    // The price burst guards the right side at this height; go left.
-    ty = rect.y + rect.h - h - inset;
-  } else if (topRow) {
-    tx = rect.x + rect.w - w - inset;
-    ty = rect.y + rect.h - h - inset;
-  }
-  ctx.translate(tx, ty);
-  ctx.rotate((index % 2 === 0 ? -1 : 1) * 0.028);
-  ctx.fillStyle = inkCss(grade);
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = paperCss(grade);
+  ctx.font = `${size}px Anton, sans-serif`;
+  const tw = ctx.measureText(rect.tag).width;
+  const padX = size * 0.55;
+  const padY = size * 0.28;
+  ctx.translate(rect.x + size * 0.7, rect.y + size * 0.7);
+  ctx.rotate(-0.045);
+  ctx.fillStyle = grade.accent;
+  ctx.fillRect(0, 0, tw + padX * 2, size + padY * 2);
+  ctx.fillStyle = grade.ink;
   ctx.textBaseline = 'middle';
-  ctx.fillText(tag, size * 0.55, h / 2 + 1);
+  ctx.fillText(rect.tag, padX, (size + padY * 2) / 2 + 1);
   ctx.restore();
 }
 
-/** The masthead: issue line, gradient title, script flourish. */
-function drawMasthead(ctx, state, grade, W, H) {
-  const ink = inkCss(grade);
-  const paper = paperCss(grade);
-  // A fall of shade at the top so the lettering wins over the art.
-  const shade = ctx.createLinearGradient(0, 0, 0, H * 0.3);
-  shade.addColorStop(0, 'rgba(6, 4, 16, 0.62)');
-  shade.addColorStop(1, 'rgba(6, 4, 16, 0)');
-  ctx.fillStyle = shade;
-  ctx.fillRect(0, 0, W, H * 0.3);
-
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-  const issueSize = Math.max(13, W * 0.021);
-  ctx.font = `${issueSize}px ${DISPLAY}`;
-  try { ctx.letterSpacing = `${Math.round(issueSize * 0.22)}px`; } catch { /* older engines */ }
-  ctx.fillStyle = paper;
-  ctx.fillText(`ISSUE ${state.issue} — VICE CITY, FL`, W * 0.035, H * 0.038);
-  const right = 'APPROVED BY THE SUNSET COMMISSION';
-  ctx.fillText(right, W * 0.965 - ctx.measureText(right).width, H * 0.038);
-  try { ctx.letterSpacing = '0px'; } catch { /* older engines */ }
-
-  // Title: Anton, sunset gradient, an ink outline thick enough to print.
-  const title = state.title || 'VICE PANELS';
-  const size = fitFont(ctx, title, DISPLAY, W * 0.185, W * 0.94);
-  const titleY = H * 0.038 + size * 1.12;
-  ctx.textAlign = 'center';
-  ctx.lineJoin = 'round';
-  ctx.strokeStyle = ink;
-  ctx.lineWidth = size * 0.17;
-  ctx.strokeText(title, W / 2, titleY);
-  const fill = ctx.createLinearGradient(0, titleY - size, 0, titleY);
-  fill.addColorStop(0, grade.masthead[0]);
-  fill.addColorStop(0.55, grade.masthead[1]);
-  fill.addColorStop(1, grade.masthead[2]);
-  ctx.fillStyle = fill;
-  ctx.fillText(title, W / 2, titleY);
-
-  // Script flourish, tucked under the title's right shoulder.
-  if (state.script) {
-    const sSize = fitFont(ctx, state.script, SCRIPT, W * 0.082, W * 0.5);
+function drawPanels(ctx, state, grade, w, h, highlight) {
+  const rects = rectsFor(state, w, h);
+  rects.forEach((rect, i) => {
+    const photo = photoForPanel(state, i);
     ctx.save();
-    ctx.translate(W * 0.635, titleY + sSize * 0.52);
-    ctx.rotate(-0.045);
+    ctx.beginPath();
+    ctx.rect(rect.x, rect.y, rect.w, rect.h);
+    ctx.clip();
+    if (photo) {
+      const art = processPhoto(photo, w, h, grade);
+      drawCoverFit(ctx, art, rect.x, rect.y, rect.w, rect.h, panForPanel(state, i));
+    } else {
+      ctx.fillStyle = grade.sky[1];
+      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    }
+    // Seat the panel: a soft shade rising from its bottom edge.
+    const shade = ctx.createLinearGradient(0, rect.y + rect.h * 0.55, 0, rect.y + rect.h);
+    shade.addColorStop(0, 'rgba(0,0,0,0)');
+    shade.addColorStop(1, 'rgba(0,0,0,0.28)');
+    ctx.fillStyle = shade;
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.restore();
+
+    // The ink frame, plus a hairline of paper inside it.
+    ctx.strokeStyle = grade.ink;
+    ctx.lineWidth = Math.max(5, w * 0.007);
+    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+    ctx.strokeStyle = grade.paper;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 2;
+    const inset = Math.max(4, w * 0.004);
+    ctx.strokeRect(rect.x + inset, rect.y + inset, rect.w - inset * 2, rect.h - inset * 2);
+    ctx.globalAlpha = 1;
+
+    if (highlight === i) {
+      ctx.strokeStyle = grade.accent;
+      ctx.lineWidth = Math.max(3, w * 0.004);
+      ctx.setLineDash([18, 12]);
+      ctx.strokeRect(rect.x - 6, rect.y - 6, rect.w + 12, rect.h + 12);
+      ctx.setLineDash([]);
+    }
+    drawPanelTag(ctx, grade, rect, h);
+  });
+}
+
+function drawCoverLines(ctx, state, grade, w, h) {
+  const lines = state.lines.map((l) => l.trim()).filter(Boolean).slice(0, 4);
+  if (lines.length === 0) return;
+  const mx = Math.round(w * 0.038);
+  const size = Math.round(h * 0.027);
+  const lineH = size * 1.62;
+  let y = h - Math.round(h * 0.03) - lines.length * lineH;
+  ctx.textBaseline = 'middle';
+  for (const line of lines) {
+    const text = line.toUpperCase();
+    const fitted = fitFontSize(ctx, text, w * 0.6, size, 'Anton, sans-serif');
+    const tw = ctx.measureText(text).width;
+    const chipH = fitted * 1.34;
+    const chipY = y + (lineH - chipH) / 2;
+    ctx.fillStyle = grade.ink;
+    ctx.globalAlpha = 0.88;
+    ctx.fillRect(mx, chipY, tw + fitted * 1.5, chipH);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = grade.accent2;
+    ctx.fillRect(mx + fitted * 0.32, chipY + chipH * 0.3, fitted * 0.4, fitted * 0.4);
+    ctx.fillStyle = grade.paper;
+    ctx.fillText(text, mx + fitted * 0.95, chipY + chipH / 2 + 1);
+    y += lineH;
+  }
+}
+
+function drawMasthead(ctx, state, grade, w, h) {
+  const mx = Math.round(w * 0.038);
+  // The title: sunset-gradient Anton with a heavy ink stroke. Its size is
+  // capped so the cap height plus the stroke always clears the top edge,
+  // and its centre drops just enough to make room — a wide, short cover
+  // (landscape) needs the drop most.
+  const title = (state.title || 'VICE PANELS').toUpperCase();
+  ctx.save();
+  const size = fitFontSize(ctx, title, w * 0.9, w * 0.165, 'Anton, sans-serif');
+  const titleY = Math.min(h * 0.135, Math.max(h * 0.104, size * 0.47));
+  ctx.translate(w / 2, titleY);
+  ctx.rotate(-0.028);
+  const grad = ctx.createLinearGradient(0, -size * 0.55, 0, size * 0.55);
+  const stops = [...grade.sky].reverse();
+  stops.forEach((stop, i) => grad.addColorStop(i / (stops.length - 1), stop));
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = grade.ink;
+  ctx.lineWidth = size * 0.16;
+  ctx.strokeText(title, 0, 0);
+  ctx.fillStyle = grad;
+  ctx.fillText(title, 0, 0);
+  ctx.restore();
+
+  // The script accent, tucked under the title's right shoulder.
+  const accent = state.accent || '';
+  if (accent) {
+    ctx.save();
+    ctx.translate(w * 0.685, titleY + size * 0.46);
+    ctx.rotate(-0.05);
+    const aSize = fitFontSize(ctx, accent, w * 0.42, w * 0.058, 'Yellowtail, cursive');
     ctx.textAlign = 'center';
-    ctx.strokeStyle = ink;
-    ctx.lineWidth = sSize * 0.14;
-    ctx.strokeText(state.script, 0, 0);
-    ctx.fillStyle = paper;
-    ctx.fillText(state.script, 0, 0);
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = grade.ink;
+    ctx.shadowOffsetY = aSize * 0.07;
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = grade.accent2;
+    ctx.fillText(accent, 0, 0);
     ctx.restore();
   }
   ctx.textAlign = 'left';
-}
 
-/** The starburst price badge, a newsstand shout in the top-right field. */
-function drawPriceBurst(ctx, state, grade, W, H) {
-  const cx = W * 0.862;
-  const cy = H * 0.315;
-  const r = W * 0.088;
-  const points = 12;
+  // Magazine furniture last, on top of the masthead, with a soft ink
+  // shadow so the issue line and price stay readable where the title's
+  // stroke passes behind them — as a real cover layers its small print.
+  const small = Math.max(12, Math.round(h * 0.02));
   ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(-0.13);
-  ctx.beginPath();
-  for (let i = 0; i < points * 2; i++) {
-    const rad = i % 2 === 0 ? r : r * 0.79;
-    const a = (i / (points * 2)) * Math.PI * 2;
-    if (i === 0) ctx.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
-    else ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+  ctx.font = `${small}px Anton, sans-serif`;
+  ctx.fillStyle = grade.paper;
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = grade.ink;
+  ctx.shadowOffsetY = 2;
+  ctx.shadowBlur = 4;
+  try {
+    ctx.letterSpacing = '3px';
+  } catch {
+    /* older engines: no letter spacing, no harm */
   }
-  ctx.closePath();
-  ctx.fillStyle = '#ffd23a';
-  ctx.fill();
-  ctx.strokeStyle = inkCss(grade);
-  ctx.lineWidth = Math.max(3, W * 0.004);
-  ctx.stroke();
-  ctx.fillStyle = '#17102c';
-  ctx.textAlign = 'center';
-  const small = r * 0.34;
-  ctx.font = `${small}px ${DISPLAY}`;
-  ctx.fillText('ONLY', 0, -r * 0.12);
-  const big = r * 0.52;
-  ctx.font = `${big}px ${DISPLAY}`;
-  ctx.fillText(state.price, 0, big * 0.72);
+  ctx.fillText(state.issue.toUpperCase(), mx, h * 0.034);
+  const priceW = ctx.measureText(state.price.toUpperCase()).width;
+  ctx.fillText(state.price.toUpperCase(), w - mx - priceW, h * 0.034);
   ctx.restore();
-  ctx.textAlign = 'left';
 }
 
-/** Stacked cover lines down the left edge, starred like a table of contents. */
-function drawCoverLines(ctx, state, grade, layout, W, H) {
-  const lines = state.lines.filter((line) => line.trim() !== '').slice(0, 4);
-  if (lines.length === 0) return;
-  const size = Math.max(15, W * 0.027);
-  ctx.font = `${size}px ${DISPLAY}`;
-  let y = H * (layout.linesY ?? 0.36);
-  for (const line of lines) {
-    ctx.fillStyle = grade.accent;
-    ctx.fillText('★', W * 0.038, y);
-    inkedText(ctx, line.toUpperCase(), W * 0.038 + size * 1.25, y, paperCss(grade));
-    y += size * 1.5;
+function drawBarcode(ctx, state, grade, w, h) {
+  const bw = Math.round(w * 0.125);
+  const bh = Math.round(h * 0.05);
+  const bx = w - Math.round(w * 0.038) - bw;
+  const by = h - Math.round(h * 0.03) - bh;
+  ctx.fillStyle = grade.paper;
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeStyle = grade.ink;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(bx, by, bw, bh);
+  // Deterministic bars from the title's characters.
+  const seed = (state.title || 'VICE').split('').reduce((a, c) => a + c.charCodeAt(0), 7);
+  let x = bx + bw * 0.07;
+  let n = seed;
+  ctx.fillStyle = grade.ink;
+  while (x < bx + bw * 0.9) {
+    n = (n * 1103515245 + 12345) % 2147483648;
+    const barW = 1 + (n % 4);
+    if (n % 3 !== 0) ctx.fillRect(x, by + bh * 0.1, barW, bh * 0.58);
+    x += barW + 2;
   }
-}
-
-/** A barcode block: white card, seeded bars, a number that almost scans. */
-function drawBarcode(ctx, W, H, barTop) {
-  const w = W * 0.155;
-  const h = H * 0.042;
-  const x = W * 0.965 - w;
-  const y = barTop - h - H * 0.012;
-  ctx.fillStyle = '#fdfdf8';
-  ctx.fillRect(x, y, w, h);
-  const rand = seededRandom(666);
-  ctx.fillStyle = '#101010';
-  let bx = x + w * 0.06;
-  const barsBottom = y + h * 0.72;
-  while (bx < x + w * 0.92) {
-    const bw = 1 + rand() * 3.2;
-    if (rand() > 0.32) ctx.fillRect(bx, y + h * 0.1, bw, barsBottom - y - h * 0.1);
-    bx += bw + 1 + rand() * 2.4;
+  const digits = '0 70989 00123 4';
+  let digitSize = Math.round(bh * 0.24);
+  ctx.font = `${digitSize}px monospace`;
+  while (ctx.measureText(digits).width > bw * 0.88 && digitSize > 6) {
+    digitSize -= 1;
+    ctx.font = `${digitSize}px monospace`;
   }
-  ctx.font = `${Math.max(9, h * 0.24)}px 'Courier New', monospace`;
   ctx.textAlign = 'center';
-  ctx.fillText('0 70989 00666 6', x + w / 2, y + h * 0.94);
+  ctx.textBaseline = 'middle';
+  ctx.fillText(digits, bx + bw / 2, by + bh * 0.85);
   ctx.textAlign = 'left';
 }
 
-/** The caption bar along the foot, with the issue's big promise. */
-function drawCaptionBar(ctx, state, grade, W, H) {
-  const barH = Math.max(54, H * 0.072);
-  const top = H - barH;
-  drawBarcode(ctx, W, H, top);
-  ctx.fillStyle = inkCss(grade);
-  ctx.fillRect(0, top, W, barH);
-  ctx.fillStyle = grade.accent;
-  ctx.fillRect(0, top, W, Math.max(3, H * 0.005));
-  if (state.caption) {
-    ctx.textAlign = 'center';
-    const size = fitFont(ctx, state.caption, DISPLAY, W * 0.034, W * 0.9);
-    inkedText(ctx, state.caption, W / 2, top + barH / 2 + size * 0.36, paperCss(grade));
-    ctx.textAlign = 'left';
-  }
+function drawVignette(ctx, grade, w, h) {
+  const r = Math.hypot(w, h) / 2;
+  const grad = ctx.createRadialGradient(w / 2, h / 2, r * 0.45, w / 2, h / 2, r);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.30)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  void grade;
 }
 
-/**
- * Draw the whole cover for `state` onto `canvas`, sizing the canvas to
- * the state's output size. Returns the canvas.
- */
-export function drawCover(canvas, state) {
+export function drawCover(ctx, state, opts = {}) {
   const size = sizeById(state.sizeId);
-  canvas.width = size.width;
-  canvas.height = size.height;
-  const { width: W, height: H } = size;
   const grade = gradeById(state.gradeId);
-  const layout = layoutById(state.layoutId);
-  const ctx = canvas.getContext('2d');
-  const artwork = artworkFor(state, W, H);
+  const { w, h } = size;
+  ctx.fillStyle = grade.ink;
+  ctx.fillRect(0, 0, w, h);
+  drawSkyBand(ctx, grade, w, coverArea(w, h).y + Math.round(h * 0.02));
+  drawPanels(ctx, state, grade, w, h, opts.highlight ?? null);
+  drawCoverLines(ctx, state, grade, w, h);
+  drawMasthead(ctx, state, grade, w, h);
+  drawBarcode(ctx, state, grade, w, h);
+  drawVignette(ctx, grade, w, h);
+}
 
-  ctx.fillStyle = inkCss(grade);
-  ctx.fillRect(0, 0, W, H);
-
-  const gap = Math.max(8, W * 0.012);
-  layout.panels.forEach((panel, index) => {
-    const rect = {
-      x: panel.x * W + gap / 2,
-      y: panel.y * H + gap / 2,
-      w: panel.w * W - gap,
-      h: panel.h * H - gap,
-    };
-    drawPanel(ctx, artwork, panel, rect, grade, index, W, H);
-  });
-
-  drawMasthead(ctx, state, grade, W, H);
-  drawPriceBurst(ctx, state, grade, W, H);
-  drawCoverLines(ctx, state, grade, layout, W, H);
-  drawCaptionBar(ctx, state, grade, W, H);
-  return canvas;
+export function exportPNG(state) {
+  const size = sizeById(state.sizeId);
+  const canvas = makeCanvas(size.w, size.h);
+  drawCover(canvas.getContext('2d'), state, { highlight: null });
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
 }

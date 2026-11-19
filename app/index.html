@@ -1,94 +1,84 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VICE PANELS · Cover Studio</title>
-<meta name="description" content="Turn a photo and a headline into GTA-style multi-panel cover art. Offline, in your browser, out as a PNG.">
+<meta name="description" content="Turn a photo and a caption into GTA-style multi-panel cover art, exported as a PNG.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="topbar">
   <div class="brand">
-    <span class="brand-mark" aria-hidden="true">VP</span>
-    <span class="brand-words">
-      <strong>VICE PANELS</strong>
-      <small>Cover Studio</small>
-    </span>
+    <span class="brand-mark">VICE PANELS</span>
+    <span class="brand-sub">cover studio</span>
   </div>
-  <p class="topbar-note">One photo in. A newsstand legend out.</p>
+  <p class="topbar-note">Your photo + your words → cover art. Everything happens on your machine.</p>
+  <button id="exportBtn" class="export" type="button">Export PNG</button>
 </header>
 
-<main class="layout">
-  <section class="stage" id="stage" aria-label="Cover preview">
-    <canvas id="cover" width="1080" height="1350" aria-label="Your composed cover art"></canvas>
-    <p class="drop-hint" aria-hidden="true">Drop a photo to recast the cover</p>
-    <p class="status" id="statusLine" role="status">Loading the studio…</p>
-  </section>
-
+<div class="shell">
   <aside class="panel" aria-label="Cover controls">
-    <fieldset class="group">
-      <legend>Photograph</legend>
-      <label class="file-btn" for="photoFile">Choose a photo…</label>
-      <input type="file" id="photoFile" accept="image/*" class="visually-hidden">
-      <div class="sample-row" id="sampleButtons" role="group" aria-label="Sample photographs"></div>
-      <p class="now" id="photoLabel">Sample — Boulevard</p>
-      <p class="hint">…or drag a photo onto the cover. Nothing leaves your machine.</p>
-    </fieldset>
-
-    <fieldset class="group">
-      <legend>Grade</legend>
-      <div class="chips" id="gradeChips" role="radiogroup" aria-label="Color grade"></div>
-    </fieldset>
-
-    <fieldset class="group">
-      <legend>Layout</legend>
-      <div class="chips" id="layoutChips" role="radiogroup" aria-label="Panel layout"></div>
-    </fieldset>
-
-    <fieldset class="group">
-      <legend>Size</legend>
-      <div class="chips" id="sizeChips" role="radiogroup" aria-label="Output size"></div>
-    </fieldset>
-
-    <fieldset class="group">
-      <legend>Lettering</legend>
-      <label class="field">
-        <span>Masthead title</span>
-        <input type="text" id="titleInput" maxlength="24" autocomplete="off">
-      </label>
-      <label class="field">
-        <span>Script flourish</span>
-        <input type="text" id="scriptInput" maxlength="28" autocomplete="off">
-      </label>
-      <label class="field">
-        <span>Cover lines <small>(one per line, four shown)</small></span>
-        <textarea id="linesInput" rows="4" maxlength="220"></textarea>
-      </label>
-      <label class="field">
-        <span>Caption bar</span>
-        <input type="text" id="captionInput" maxlength="60" autocomplete="off">
-      </label>
-      <div class="field-pair">
-        <label class="field">
-          <span>Issue</span>
-          <input type="text" id="issueInput" maxlength="8" autocomplete="off">
-        </label>
-        <label class="field">
-          <span>Price</span>
-          <input type="text" id="priceInput" maxlength="8" autocomplete="off">
-        </label>
+    <section>
+      <h2>Photo</h2>
+      <label class="file-btn" for="fileInput">Add your photo</label>
+      <input id="fileInput" type="file" accept="image/*" multiple hidden>
+      <div class="row">
+        <button type="button" class="chip" data-sample="boulevard">Sample: Boulevard</button>
+        <button type="button" class="chip" data-sample="pier">Sample: Pier</button>
       </div>
-    </fieldset>
+      <div id="tray" class="tray" aria-label="Photos on this cover"></div>
+      <p class="hint">Click a photo to drop it into the selected panel. Or drag photos anywhere onto the cover.</p>
+    </section>
 
-    <button type="button" class="export-btn" id="exportBtn">Export PNG</button>
-    <p class="hint">Exports at full size, exactly as composed.</p>
+    <section>
+      <h2>Layout</h2>
+      <div id="layoutBtns" class="seg-group"></div>
+    </section>
+
+    <section>
+      <h2>Grade</h2>
+      <div id="gradeBtns" class="seg-group"></div>
+    </section>
+
+    <section>
+      <h2>Post size</h2>
+      <div id="sizeBtns" class="seg-group"></div>
+    </section>
+
+    <section>
+      <h2>Cover words</h2>
+      <label class="field">Title
+        <input id="titleInput" type="text" value="VICE PANELS" maxlength="24" autocomplete="off">
+      </label>
+      <label class="field">Script accent
+        <input id="accentInput" type="text" value="cover studio" maxlength="30" autocomplete="off">
+      </label>
+      <label class="field">Issue line
+        <input id="issueInput" type="text" value="VOL. 01 · THE SUNSET ISSUE" maxlength="40" autocomplete="off">
+      </label>
+      <label class="field">Cover lines, one per line
+        <textarea id="linesInput" rows="3">10 best getaway rides, ranked
+Neon nights: the city after dark
+Meet the crew everyone fears</textarea>
+      </label>
+    </section>
+
+    <section>
+      <h2>Panel</h2>
+      <p id="panelHint" class="hint">Add a photo to begin.</p>
+      <label class="field">Zoom
+        <input id="zoom" type="range" min="1" max="3" step="0.01" value="1">
+      </label>
+      <button id="resetPan" type="button" class="chip">Reset framing</button>
+    </section>
   </aside>
-</main>
 
-<footer class="colophon">
-  <p>VICE PANELS · Cover Studio — a love letter to the golden age of game covers. Runs entirely offline; your photos never leave this page.</p>
-</footer>
+  <main class="stage" id="stage">
+    <canvas id="cover" width="1080" height="1350" aria-label="Your cover, live preview"></canvas>
+    <p class="drop-hint">Drop a photo to use it</p>
+  </main>
+</div>
 
 <script type="module" src="src/main.js"></script>
 </body>

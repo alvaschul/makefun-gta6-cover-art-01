@@ -1,31 +1,32 @@
-// VICE PANELS · Cover Studio — entrypoint.
+// main.ts — hands the VICE PANELS entry in.
 //
-// Running `node main.ts` packages the entry: it copies app/ and
-// screenshots/ into the output directory (MAKEFUN_OUTPUT_DIR, default
-// ./output beside this file) and writes the dossier the bounty grades —
-// buildDossier from the kit's vendor library, run over that copy, so the
-// dossier describes exactly the bytes that were packaged.
+// Copies app/ and screenshots/ from this repository into the output
+// directory, then writes the entry dossier there with the kit's own
+// buildDossier, so the file the scorer reads is built by the same code
+// the scorer builds it with. The output directory is $MAKEFUN_OUTPUT_DIR
+// when set, else /output when it exists (the grader), else ./output.
 
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
 
-const root = dirname(fileURLToPath(import.meta.url));
-const outDir = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? join(root, 'output'));
+const here = resolve(fileURLToPath(new URL('.', import.meta.url)));
+const out = process.env.MAKEFUN_OUTPUT_DIR
+  ? resolve(process.env.MAKEFUN_OUTPUT_DIR)
+  : existsSync('/output')
+    ? '/output'
+    : join(here, 'output');
 
-mkdirSync(outDir, { recursive: true });
-for (const name of ['app', 'screenshots']) {
-  cpSync(join(root, name), join(outDir, name), { recursive: true, force: true });
-}
+mkdirSync(out, { recursive: true });
+cpSync(join(here, 'app'), join(out, 'app'), { recursive: true });
+cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
 
-const dossier = buildDossier(outDir, {
+const dossier = buildDossier(out, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   app_max_files: 993,
   app_max_bytes: 50331648,
 });
-
-const target = join(outDir, 'dossier.json');
-writeFileSync(target, dossier);
-console.log(`VICE PANELS dossier written: ${target} (${dossier.length} bytes)`);
+writeFileSync(join(out, 'dossier.json'), dossier);
+console.log(`VICE PANELS handed in: ${out}/dossier.json (${dossier.length} bytes)`);
