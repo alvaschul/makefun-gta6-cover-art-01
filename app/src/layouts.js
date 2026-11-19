@@ -1,79 +1,51 @@
-// layouts.js — the comic panel layouts a cover can be built from.
+// Panel layouts: how the cover's photo area is cut into comic panels.
 //
-// Panels are fractions of the panel area (x, y, w, h in 0..1), so one
-// layout works at every output size. Each panel carries a tag — the little
-// rotated sticker ("COVER STORY", "EXCLUSIVE") that magazine covers wear.
-// cover.js turns these fractions into pixels and adds the ink gutters.
+// Rects are fractions of the photo area (0..1), so a layout works at every
+// output size. `cx`/`cy` pick the crop centre of the photo inside that panel
+// and `zoom` how far in it punches, so a single photo reads as a different
+// moment in every panel. `tag` is the little caption chip in the corner.
 
 export const LAYOUTS = [
   {
-    id: 'solo',
-    name: 'Solo Splash',
-    panels: [{ x: 0, y: 0, w: 1, h: 1, tag: 'COVER STORY' }],
-  },
-  {
-    id: 'duo',
-    name: 'Split Duo',
+    id: 'hero-stack',
+    name: 'Hero Stack',
     panels: [
-      { x: 0, y: 0, w: 1, h: 0.58, tag: 'COVER STORY' },
-      { x: 0, y: 0.58, w: 1, h: 0.42, tag: 'PLUS' },
+      { x: 0, y: 0, w: 1, h: 0.58, cx: 0.5, cy: 0.38, zoom: 1.05, tag: 'THE CITY' },
+      { x: 0, y: 0.58, w: 0.5, h: 0.42, cx: 0.3, cy: 0.6, zoom: 1.5, tag: 'THE CREW' },
+      { x: 0.5, y: 0.58, w: 0.5, h: 0.42, cx: 0.72, cy: 0.55, zoom: 1.5, tag: 'THE SCORE' },
     ],
   },
   {
-    id: 'trio',
-    name: 'Top Story Trio',
+    id: 'quad-grid',
+    name: 'Quad Grid',
     panels: [
-      { x: 0, y: 0, w: 1, h: 0.6, tag: 'COVER STORY' },
-      { x: 0, y: 0.6, w: 0.5, h: 0.4, tag: 'EXCLUSIVE' },
-      { x: 0.5, y: 0.6, w: 0.5, h: 0.4, tag: 'FIRST LOOK' },
+      { x: 0, y: 0, w: 0.5, h: 0.5, cx: 0.32, cy: 0.35, zoom: 1.4, tag: 'DAWN' },
+      { x: 0.5, y: 0, w: 0.5, h: 0.5, cx: 0.68, cy: 0.35, zoom: 1.4, tag: 'NOON' },
+      { x: 0, y: 0.5, w: 0.5, h: 0.5, cx: 0.32, cy: 0.68, zoom: 1.4, tag: 'DUSK' },
+      { x: 0.5, y: 0.5, w: 0.5, h: 0.5, cx: 0.68, cy: 0.68, zoom: 1.4, tag: 'VICE HOUR' },
     ],
   },
   {
-    id: 'quad',
-    name: 'Four-Up Grid',
+    id: 'tall-story',
+    name: 'Tall Story',
     panels: [
-      { x: 0, y: 0, w: 0.5, h: 0.5, tag: 'THE CREW' },
-      { x: 0.5, y: 0, w: 0.5, h: 0.5, tag: 'THE RIDES' },
-      { x: 0, y: 0.5, w: 0.5, h: 0.5, tag: 'THE CITY' },
-      { x: 0.5, y: 0.5, w: 0.5, h: 0.5, tag: 'THE SCORE' },
+      { x: 0, y: 0, w: 0.62, h: 1, cx: 0.42, cy: 0.5, zoom: 1.1, tag: 'THE LEAD' },
+      { x: 0.62, y: 0, w: 0.38, h: 0.34, cx: 0.6, cy: 0.3, zoom: 1.6, tag: 'DETAIL' },
+      { x: 0.62, y: 0.34, w: 0.38, h: 0.33, cx: 0.4, cy: 0.55, zoom: 1.6, tag: 'DETAIL' },
+      { x: 0.62, y: 0.67, w: 0.38, h: 0.33, cx: 0.55, cy: 0.75, zoom: 1.6, tag: 'DETAIL' },
     ],
   },
   {
-    id: 'vice-grid',
-    name: 'Vice Grid',
+    id: 'triptych',
+    name: 'Triptych',
     panels: [
-      { x: 0, y: 0, w: 0.56, h: 1, tag: 'COVER STORY' },
-      { x: 0.56, y: 0, w: 0.44, h: 0.52, tag: 'EXCLUSIVE' },
-      { x: 0.56, y: 0.52, w: 0.44, h: 0.48, tag: 'PHOTO SPECIAL' },
-    ],
-  },
-  {
-    id: 'strips',
-    name: 'Film Strips',
-    panels: [
-      { x: 0, y: 0, w: 0.34, h: 1, tag: 'ACT I' },
-      { x: 0.34, y: 0, w: 0.33, h: 1, tag: 'ACT II' },
-      { x: 0.67, y: 0, w: 0.33, h: 1, tag: 'ACT III' },
+      { x: 0, y: 0, w: 0.34, h: 1, cx: 0.2, cy: 0.5, zoom: 1.25, tag: 'ACT I' },
+      { x: 0.34, y: 0, w: 0.32, h: 1, cx: 0.5, cy: 0.45, zoom: 1.25, tag: 'ACT II' },
+      { x: 0.66, y: 0, w: 0.34, h: 1, cx: 0.8, cy: 0.5, zoom: 1.25, tag: 'ACT III' },
     ],
   },
 ];
 
 export function layoutById(id) {
   return LAYOUTS.find((l) => l.id === id) ?? LAYOUTS[0];
-}
-
-// Pixel rectangles for a layout inside a panel area, with the gutter
-// carved out between panels. Returns one rect per panel, in order.
-export function panelRects(layout, area, gutter) {
-  return layout.panels.map((p) => {
-    const x = area.x + p.x * area.w;
-    const y = area.y + p.y * area.h;
-    const w = p.w * area.w;
-    const h = p.h * area.h;
-    const left = p.x > 0 ? gutter / 2 : 0;
-    const top = p.y > 0 ? gutter / 2 : 0;
-    const right = p.x + p.w < 1 ? gutter / 2 : 0;
-    const bottom = p.y + p.h < 1 ? gutter / 2 : 0;
-    return { x: x + left, y: y + top, w: w - left - right, h: h - top - bottom, tag: p.tag };
-  });
 }

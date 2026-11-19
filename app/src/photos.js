@@ -1,46 +1,36 @@
-// photos.js — where a cover's photographs come from.
+// Photo intake: the bundled samples and the visitor's own pictures.
 //
-// Two sample photos ship with the app (made for it, free to use); the
-// person's own photos arrive through the file picker or drag-and-drop and
-// are read on their own machine only — nothing is ever uploaded.
+// Photos are read on this machine only. A picked file becomes an object URL
+// in this tab and is never uploaded anywhere; the samples ship with the app.
 
 export const SAMPLES = [
-  { id: 'boulevard', src: 'samples/boulevard.jpg', name: 'Boulevard' },
-  { id: 'pier', src: 'samples/pier.jpg', name: 'Pier' },
+  { id: 'boulevard', src: 'samples/boulevard.jpg', label: 'Sample — Boulevard' },
+  { id: 'pier', src: 'samples/pier.jpg', label: 'Sample — Pier' },
 ];
 
-let counter = 0;
-
-function toPhoto(img, id, name) {
-  return { id, img, name, w: img.naturalWidth, h: img.naturalHeight };
-}
-
-export function loadSample(sample) {
+// Load an image from a URL inside the app and wait until it can be drawn.
+export function loadPhoto(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(toPhoto(img, `sample-${sample.id}`, sample.name));
-    img.onerror = () => reject(new Error(`could not load ${sample.src}`));
-    img.src = sample.src;
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`could not load photo: ${src}`));
+    img.src = src;
   });
 }
 
-export function loadFile(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      counter += 1;
-      const name = file.name.replace(/\.[^.]+$/, '') || 'My photo';
-      resolve(toPhoto(img, `file-${counter}`, name));
-    };
-    img.onerror = () => {
+// Load a visitor's own file the same way, from a throwaway object URL.
+export function loadPhotoFile(file) {
+  const url = URL.createObjectURL(file);
+  return loadPhoto(url).then(
+    (img) => img,
+    (err) => {
       URL.revokeObjectURL(url);
-      reject(new Error(`could not read ${file.name}`));
-    };
-    img.src = url;
-  });
+      throw err;
+    },
+  );
 }
 
-export function isImageFile(file) {
-  return file && typeof file.type === 'string' && file.type.startsWith('image/');
+// True when a drag event is carrying files, so the stage can light up.
+export function dragHasFiles(event) {
+  return [...(event.dataTransfer?.types ?? [])].includes('Files');
 }
