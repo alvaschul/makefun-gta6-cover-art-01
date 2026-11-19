@@ -91,7 +91,7 @@ function drawPanelPhoto(ctx, rect, panel, grade) {
   }
   const img = panel.img;
   const zoom = panel.zoom || 1;
-  // Poster path: the photo pre-rendered as flat inked art for this grade.
+  // Poster path: the photo, pre-rendered as flat inked art for this grade.
   // Crop math runs on the bitmap's own size — same aspect as the photo.
   const art = getPosterArt(img, grade);
   const src = art || img;

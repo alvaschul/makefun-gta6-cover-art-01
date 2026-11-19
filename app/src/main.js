@@ -437,7 +437,7 @@ async function applyScene(scene) {
   if (scene.coverOnly) document.body.classList.add('shot-cover');
   canvas.width = scene.size.w;
   canvas.height = scene.size.h;
-  // Keep state.size in step with the scene even for sizes outside SIZES.
+  // Keep state.sizeId in step with the scene, even for sizes outside SIZES.
   drawCover(canvas, view(!scene.coverOnly));
   syncControls();
   drawCover(canvas, view(!scene.coverOnly));
