@@ -1,83 +1,76 @@
-// VICE PANELS — layout definitions.
-// Every rect is relative (0..1) to the full cover, so a layout reflows to any
-// export aspect: square, portrait, wide or story. `title` is the lettering
-// block; `panels` are photo cells in reading order. A panel may carry a tilt
-// in degrees (the Cover Story snapshots).
+// layouts.js — the cover's geometry: output sizes and panel layouts.
+//
+// A panel is a rectangle in cover fractions (0..1 on both axes) plus the
+// storytelling details the composer needs: a tag for its corner chip, the
+// focal point of the photograph to favor inside it, and a zoom so the same
+// photograph reads as a different shot in every panel — a wide establishing
+// frame up top, tight crops below, like a real comic cover's art.
 
-function gridPanels(x0, y0, w, h, cols, rows, gap) {
-  const panels = [];
-  const cw = (w - gap * (cols - 1)) / cols;
-  const ch = (h - gap * (rows - 1)) / rows;
-  for (let r = 0; r < rows; r += 1) {
-    for (let c = 0; c < cols; c += 1) {
-      panels.push({ x: x0 + c * (cw + gap), y: y0 + r * (ch + gap), w: cw, h: ch });
-    }
-  }
-  return panels;
+/** The social-post sizes a cover can be composed at. */
+export const SIZES = [
+  { id: 'portrait', name: 'Portrait 4:5', width: 1080, height: 1350, use: 'Feed posts' },
+  { id: 'square', name: 'Square 1:1', width: 1080, height: 1080, use: 'Grid posts' },
+  { id: 'story', name: 'Story 9:16', width: 1080, height: 1920, use: 'Stories & reels covers' },
+];
+
+const sizeMap = new Map(SIZES.map((size) => [size.id, size]));
+
+/** The size with this id, or the portrait size when the id is unknown. */
+export function sizeById(id) {
+  return sizeMap.get(id) ?? SIZES[0];
 }
 
 export const LAYOUTS = [
   {
-    id: 'classic-nine',
-    name: 'Classic Nine',
-    blurb: '3 x 3 grid under the title block',
-    title: { x: 0, y: 0, w: 1, h: 0.185 },
-    panels: gridPanels(0.012, 0.197, 0.976, 0.791, 3, 3, 0.008),
-  },
-  {
-    id: 'hero-three',
-    name: 'Hero & Three',
-    blurb: 'One big hero, three stacked beats',
-    title: { x: 0, y: 0, w: 1, h: 0.17 },
+    id: 'hero-strip',
+    name: 'Hero Strip',
+    blurb: 'One wide scene up top, two tight shots underneath.',
     panels: [
-      { x: 0.012, y: 0.182, w: 0.6, h: 0.806 },
-      { x: 0.62, y: 0.182, w: 0.368, h: 0.262 },
-      { x: 0.62, y: 0.452, w: 0.368, h: 0.262 },
-      { x: 0.62, y: 0.722, w: 0.368, h: 0.266 },
+      { x: 0, y: 0, w: 1, h: 0.6, tag: 'VICE CITY', focalX: 0.5, focalY: 0.32, zoom: 1 },
+      { x: 0, y: 0.6, w: 0.52, h: 0.4, tag: 'THE STRIP', focalX: 0.22, focalY: 0.72, zoom: 1.45 },
+      { x: 0.52, y: 0.6, w: 0.48, h: 0.4, tag: 'OCEAN DR', focalX: 0.8, focalY: 0.62, zoom: 1.3 },
     ],
   },
   {
-    id: 'cover-story',
-    name: 'Cover Story',
-    blurb: 'Full-bleed hero with tilted snapshots',
-    title: { x: 0, y: 0, w: 1, h: 0.21 },
+    id: 'quad-grid',
+    name: 'Quad Grid',
+    blurb: 'Four frames, off-balance — the classic ensemble cover.',
     panels: [
-      { x: 0, y: 0, w: 1, h: 1 },
-      { x: 0.565, y: 0.56, w: 0.375, h: 0.335, tilt: -4 },
-      { x: 0.075, y: 0.615, w: 0.335, h: 0.30, tilt: 3.5 },
+      { x: 0, y: 0, w: 0.56, h: 0.46, tag: 'THE DRIVER', focalX: 0.3, focalY: 0.3, zoom: 1.25 },
+      { x: 0.56, y: 0, w: 0.44, h: 0.46, tag: 'THE FIXER', focalX: 0.72, focalY: 0.28, zoom: 1.5 },
+      { x: 0, y: 0.46, w: 0.44, h: 0.54, tag: 'THE SIREN', focalX: 0.28, focalY: 0.68, zoom: 1.4 },
+      { x: 0.44, y: 0.46, w: 0.56, h: 0.54, tag: 'THE GETAWAY', focalX: 0.68, focalY: 0.7, zoom: 1.15 },
     ],
   },
   {
-    id: 'split-boulevard',
-    name: 'Split Boulevard',
-    blurb: 'Two tall panels over a wide strip',
-    title: { x: 0, y: 0, w: 1, h: 0.175 },
+    id: 'triptych',
+    name: 'Triptych',
+    blurb: 'Three vertical slices — three lives, one city.',
     panels: [
-      { x: 0.012, y: 0.187, w: 0.482, h: 0.475 },
-      { x: 0.506, y: 0.187, w: 0.482, h: 0.475 },
-      { x: 0.012, y: 0.674, w: 0.976, h: 0.314 },
+      { x: 0, y: 0, w: 0.34, h: 1, tag: 'ACT I', focalX: 0.18, focalY: 0.45, zoom: 1.2 },
+      { x: 0.34, y: 0, w: 0.32, h: 1, tag: 'ACT II', focalX: 0.5, focalY: 0.4, zoom: 1.35 },
+      { x: 0.66, y: 0, w: 0.34, h: 1, tag: 'ACT III', focalX: 0.84, focalY: 0.5, zoom: 1.2 },
     ],
   },
   {
-    id: 'six-pack',
-    name: 'Six Pack',
-    blurb: 'Two columns, three rows of action',
-    title: { x: 0, y: 0, w: 1, h: 0.165 },
-    panels: gridPanels(0.012, 0.177, 0.976, 0.811, 2, 3, 0.009),
-  },
-  {
-    id: 'full-bleed',
-    name: 'Full Bleed',
-    blurb: 'A single poster panel, title on top',
-    title: { x: 0, y: 0, w: 1, h: 0.22 },
-    panels: [{ x: 0, y: 0, w: 1, h: 1 }],
+    id: 'front-page',
+    name: 'Front Page',
+    blurb: 'A newspaper stack: headline frame, two columns, a footer scene.',
+    // Cover lines start lower here: the second row's panels (and their
+    // tags) own the band the other layouts leave free at 0.36.
+    linesY: 0.435,
+    panels: [
+      { x: 0, y: 0, w: 1, h: 0.34, tag: 'EXTRA! EXTRA!', focalX: 0.5, focalY: 0.25, zoom: 1.05 },
+      { x: 0, y: 0.34, w: 0.62, h: 0.36, tag: 'THE SCORE', focalX: 0.32, focalY: 0.55, zoom: 1.35 },
+      { x: 0.62, y: 0.34, w: 0.38, h: 0.36, tag: 'THE HEAT', focalX: 0.78, focalY: 0.5, zoom: 1.55 },
+      { x: 0, y: 0.7, w: 1, h: 0.3, tag: 'SUNSET BLVD', focalX: 0.5, focalY: 0.8, zoom: 1.1 },
+    ],
   },
 ];
 
-export function getLayout(id) {
-  return LAYOUTS.find((l) => l.id === id) ?? LAYOUTS[0];
-}
+const layoutByIdMap = new Map(LAYOUTS.map((layout) => [layout.id, layout]));
 
-export function panelCount(id) {
-  return getLayout(id).panels.length;
+/** The layout with this id, or the hero layout when the id is unknown. */
+export function layoutById(id) {
+  return layoutByIdMap.get(id) ?? LAYOUTS[0];
 }

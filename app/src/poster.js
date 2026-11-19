@@ -1,144 +1,180 @@
-// VICE PANELS — the poster pipeline.
-// Turns a photograph into flat, inked poster art, GTA-cover style:
-//   boost -> posterize -> palette-ramp blend -> hard shadow push -> ink edges.
-// The whole photo is processed once per (photo, grade) at a capped resolution
-// and cached; crops are applied later when the cached bitmap is drawn into a
-// panel, so dragging and zooming never reprocess pixels. If the canvas is
-// tainted (file:// pages) getImageData throws — we cache null and cover.js
-// falls back to its CSS-filter path, so the app never breaks.
+// poster.js — turns a photograph into flat inked poster art.
+//
+// The pipeline, all on CPU pixel buffers so a cover renders identically
+// every time it is asked for:
+//
+//   1. The photo is drawn cover-fit onto a work canvas at the cover's size.
+//   2. Each pixel is pushed through the grade's contrast and saturation.
+//   3. Luminance is posterized into a small number of flat bands, with a
+//      whisper of Bayer ordered dithering so skies break into print texture
+//      instead of hard steps.
+//   4. Every band is painted with the grade's ramp color — no gradients
+//      survive; the art is flat, like screen-print ink.
+//   5. Ink lines are drawn where the picture has real edges (a Sobel pass
+//      over the luminance) and where one band slams into the next.
+//   6. The darkest bands get a halftone dot screen, and the whole sheet
+//      gets seeded grain and a soft vignette, so it feels printed, not
+//      rendered.
+//
+// The grain and dither come from a seeded generator: same photo, same
+// grade, same seed, same art. Screenshots depend on that.
 
-const MAX_SIDE = 900;
-const INK = [16, 5, 26];
-
-const artCache = new WeakMap(); // img -> Map<gradeId, canvas|null>
-const lutCache = new Map(); // gradeId -> Uint8ClampedArray(256 * 3)
-
-function rampLut(grade) {
-  let lut = lutCache.get(grade.id);
-  if (lut) return lut;
-  lut = new Uint8ClampedArray(256 * 3);
-  const stops = grade.ramp;
-  for (let i = 0; i < 256; i += 1) {
-    const t = (i / 255) * (stops.length - 1);
-    const a = Math.min(stops.length - 2, Math.floor(t));
-    const f = t - a;
-    const c0 = stops[a];
-    const c1 = stops[a + 1];
-    lut[i * 3] = c0[0] + (c1[0] - c0[0]) * f;
-    lut[i * 3 + 1] = c0[1] + (c1[1] - c0[1]) * f;
-    lut[i * 3 + 2] = c0[2] + (c1[2] - c0[2]) * f;
-  }
-  lutCache.set(grade.id, lut);
-  return lut;
+/** A tiny deterministic PRNG (mulberry32) for grain that never changes. */
+export function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-function processPhoto(img, grade) {
-  const iw = img.naturalWidth;
-  const ih = img.naturalHeight;
-  if (!iw || !ih) return null;
-  const scale = Math.min(1, MAX_SIDE / Math.max(iw, ih));
-  const w = Math.max(1, Math.round(iw * scale));
-  const h = Math.max(1, Math.round(ih * scale));
+// 4x4 Bayer matrix, normalized to 0..1: the ordered-dither pattern.
+const BAYER = [
+  [0, 8, 2, 10],
+  [12, 4, 14, 6],
+  [3, 11, 1, 9],
+  [15, 7, 13, 5],
+].map((row) => row.map((v) => (v + 0.5) / 16));
+
+const clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+
+/**
+ * Draw `image` into a fresh canvas of width x height with cover-fit
+ * cropping around the focal point (fractions, 0..1) and return the canvas.
+ */
+export function coverFitCanvas(image, width, height, focalX = 0.5, focalY = 0.5) {
   const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0, w, h);
-  let imageData;
-  try {
-    imageData = ctx.getImageData(0, 0, w, h);
-  } catch {
-    return null; // tainted canvas — caller falls back to the filter path
-  }
-  const d = imageData.data;
-  const n = w * h;
-  const { sat, contrast, tint, levels } = grade;
-  const brightness = grade.brightness ?? 1;
-  const lut = rampLut(grade);
-  const shadow = grade.ramp[0];
-  const steps = levels + 1;
-
-  // Pass 1 — boost saturation / contrast / brightness, record luminance.
-  const lum = new Float32Array(n);
-  for (let i = 0, p = 0; i < d.length; i += 4, p += 1) {
-    let r = d[i] * brightness;
-    let g = d[i + 1] * brightness;
-    let b = d[i + 2] * brightness;
-    const avg = (r + g + b) / 3;
-    r = avg + (r - avg) * sat;
-    g = avg + (g - avg) * sat;
-    b = avg + (b - avg) * sat;
-    r = (r - 128) * contrast + 128;
-    g = (g - 128) * contrast + 128;
-    b = (b - 128) * contrast + 128;
-    d[i] = r;
-    d[i + 1] = g;
-    d[i + 2] = b;
-    lum[p] = (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
-  }
-
-  // Pass 2 — Sobel edge strength on the boosted luminance, normalized 0..255.
-  const edge = new Uint8ClampedArray(n);
-  for (let y = 1; y < h - 1; y += 1) {
-    const row = y * w;
-    for (let x = 1; x < w - 1; x += 1) {
-      const p = row + x;
-      const gx = -lum[p - w - 1] - 2 * lum[p - 1] - lum[p + w - 1]
-        + lum[p - w + 1] + 2 * lum[p + 1] + lum[p + w + 1];
-      const gy = -lum[p - w - 1] - 2 * lum[p - w] - lum[p - w + 1]
-        + lum[p + w - 1] + 2 * lum[p + w] + lum[p + w + 1];
-      const mag = Math.sqrt(gx * gx + gy * gy) / 4;
-      edge[p] = Math.min(1, mag) * 255;
-    }
-  }
-
-  // Pass 3 — posterize channels, blend toward the ramp by luminance band,
-  // push the darkest bands into the deep shadow colour, ink the edges.
-  const keep = 1 - tint;
-  for (let i = 0, p = 0; i < d.length; i += 4, p += 1) {
-    const band = Math.min(levels - 1, Math.floor(lum[p] * levels));
-    const li = Math.round((band / (levels - 1)) * 255) * 3;
-    let r = Math.round((d[i] / 255) * (steps - 1)) / (steps - 1) * 255;
-    let g = Math.round((d[i + 1] / 255) * (steps - 1)) / (steps - 1) * 255;
-    let b = Math.round((d[i + 2] / 255) * (steps - 1)) / (steps - 1) * 255;
-    r = r * keep + lut[li] * tint;
-    g = g * keep + lut[li + 1] * tint;
-    b = b * keep + lut[li + 2] * tint;
-    if (band === 0) {
-      r = r * 0.76 + shadow[0] * 0.24;
-      g = g * 0.76 + shadow[1] * 0.24;
-      b = b * 0.76 + shadow[2] * 0.24;
-    } else if (band === 1) {
-      r = r * 0.9 + shadow[0] * 0.1;
-      g = g * 0.9 + shadow[1] * 0.1;
-      b = b * 0.9 + shadow[2] * 0.1;
-    }
-    const e = edge[p] / 255;
-    if (e > 0.13) {
-      const s = Math.min(0.82, (e - 0.13) * 2.3) * 0.85;
-      r = r * (1 - s) + INK[0] * s;
-      g = g * (1 - s) + INK[1] * s;
-      b = b * (1 - s) + INK[2] * s;
-    }
-    d[i] = r;
-    d[i + 1] = g;
-    d[i + 2] = b;
-  }
-
-  ctx.putImageData(imageData, 0, 0);
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+  const sw = width / scale;
+  const sh = height / scale;
+  const sx = Math.max(0, Math.min(image.naturalWidth - sw, focalX * image.naturalWidth - sw / 2));
+  const sy = Math.max(0, Math.min(image.naturalHeight - sh, focalY * image.naturalHeight - sh / 2));
+  ctx.drawImage(image, sx, sy, sw, sh, 0, 0, width, height);
   return canvas;
 }
 
-// The processed bitmap for a photo under a grade, or null when pixel access
-// is unavailable. Cached per image element + grade id.
-export function getPosterArt(img, grade) {
-  let byGrade = artCache.get(img);
-  if (!byGrade) {
-    byGrade = new Map();
-    artCache.set(img, byGrade);
+/**
+ * The whole pipeline: photograph in, poster art canvas out.
+ * `image` is an HTMLImageElement; the art is produced at width x height.
+ */
+export function makeArtwork(image, grade, width, height, seed = 1986) {
+  const work = coverFitCanvas(image, width, height);
+  const ctx = work.getContext('2d', { willReadFrequently: true });
+  const frame = ctx.getImageData(0, 0, width, height);
+  const px = frame.data;
+  const count = width * height;
+
+  // Pass 1: grade contrast + saturation, and bank the luminance.
+  const lum = new Float32Array(count);
+  const { contrast, saturation } = grade;
+  for (let i = 0, p = 0; i < count; i++, p += 4) {
+    let r = px[p];
+    let g = px[p + 1];
+    let b = px[p + 2];
+    const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    r = l + (r - l) * saturation;
+    g = l + (g - l) * saturation;
+    b = l + (b - l) * saturation;
+    r = (r - 128) * contrast + 128;
+    g = (g - 128) * contrast + 128;
+    b = (b - 128) * contrast + 128;
+    px[p] = clamp255(r);
+    px[p + 1] = clamp255(g);
+    px[p + 2] = clamp255(b);
+    lum[i] = (0.2126 * px[p] + 0.7152 * px[p + 1] + 0.0722 * px[p + 2]) / 255;
   }
-  if (!byGrade.has(grade.id)) {
-    byGrade.set(grade.id, processPhoto(img, grade));
+
+  // Pass 2: Sobel edge strength over the luminance field.
+  const edge = new Float32Array(count);
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const i = y * width + x;
+      const gx =
+        -lum[i - width - 1] - 2 * lum[i - 1] - lum[i + width - 1] +
+        lum[i - width + 1] + 2 * lum[i + 1] + lum[i + width + 1];
+      const gy =
+        -lum[i - width - 1] - 2 * lum[i - width] - lum[i - width + 1] +
+        lum[i + width - 1] + 2 * lum[i + width] + lum[i + width + 1];
+      edge[i] = Math.sqrt(gx * gx + gy * gy);
+    }
   }
-  return byGrade.get(grade.id);
+
+  // Pass 3: posterize into bands, paint the ramp, lay the ink.
+  const bands = grade.bands;
+  const ramp = grade.ramp;
+  const bandOf = new Uint8Array(count);
+  const ditherSpan = 0.55 / bands; // how far the Bayer pattern may push a pixel across a band edge
+  for (let y = 0; y < height; y++) {
+    const bayerRow = BAYER[y & 3];
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      const pushed = lum[i] + (bayerRow[x & 3] - 0.5) * ditherSpan;
+      let band = Math.floor(pushed * bands);
+      if (band < 0) band = 0;
+      if (band > bands - 1) band = bands - 1;
+      bandOf[i] = band;
+    }
+  }
+
+  const [inkR, inkG, inkB] = grade.ink;
+  const rand = seededRandom(seed);
+  const grainSpan = grade.grain * 255;
+  const cx = width / 2;
+  const cy = height / 2;
+  const maxDist = Math.sqrt(cx * cx + cy * cy);
+
+  for (let y = 0, p = 0; y < height; y++) {
+    for (let x = 0; x < width; x++, p += 4) {
+      const i = y * width + x;
+      const band = bandOf[i];
+      // Ramp stops span the band range: stretch the grade's stops over its bands.
+      const stop = Math.round((band / (bands - 1)) * (ramp.length - 1));
+      let [r, g, b] = ramp[stop];
+
+      // Ink: a real edge, or a cliff between this band and a neighbour's.
+      let inkMix = 0;
+      if (edge[i] > 0.55) inkMix = Math.min(1, (edge[i] - 0.55) * 2.4);
+      if (inkMix < 0.85) {
+        const right = x + 1 < width ? bandOf[i + 1] : band;
+        const below = y + 1 < height ? bandOf[i + width] : band;
+        if (Math.abs(right - band) >= 2 || Math.abs(below - band) >= 2) inkMix = 0.85;
+      }
+      if (inkMix > 0) {
+        r = r + (inkR - r) * inkMix;
+        g = g + (inkG - g) * inkMix;
+        b = b + (inkB - b) * inkMix;
+      }
+
+      // Halftone: a dot screen printed over the two darkest bands.
+      if (grade.halftone > 0 && band <= 1) {
+        const cell = 7;
+        const dx = (x % cell) - cell / 2;
+        const dy = (y % cell) - cell / 2;
+        const radius = (1 - band / 2) * grade.halftone * (cell / 2);
+        if (dx * dx + dy * dy < radius * radius) {
+          r *= 0.72;
+          g *= 0.72;
+          b *= 0.72;
+        }
+      }
+
+      // Grain and vignette: the print shop's fingerprints.
+      const noise = (rand() - 0.5) * grainSpan;
+      const dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)) / maxDist;
+      const shade = 1 - 0.16 * dist * dist;
+      px[p] = clamp255((r + noise) * shade);
+      px[p + 1] = clamp255((g + noise) * shade);
+      px[p + 2] = clamp255((b + noise) * shade);
+      px[p + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(frame, 0, 0);
+  return work;
 }
