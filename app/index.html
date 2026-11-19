@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VICE PANELS · Cover Studio</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="rail">
+    <header class="brand">
+      <div class="brand-mark">VICE <span>PANELS</span></div>
+      <p class="brand-sub">Cover Studio — your photos, poster energy. Fully offline: photos never leave this machine.</p>
+    </header>
+
+    <section class="group">
+      <h2>Layout</h2>
+      <div class="layout-list" id="layoutList" role="listbox" aria-label="Cover layout"></div>
+    </section>
+
+    <section class="group">
+      <h2>Grade</h2>
+      <div class="grade-list" id="gradeList" aria-label="Colour grade"></div>
+    </section>
+
+    <section class="group">
+      <h2>Lettering</h2>
+      <label class="field">Title
+        <input id="titleInput" type="text" maxlength="26" value="VICE PANELS">
+      </label>
+      <label class="field">Subtitle (script)
+        <input id="subtitleInput" type="text" maxlength="34" value="vice panels originals">
+      </label>
+      <label class="field">Badge ribbon
+        <input id="badgeInput" type="text" maxlength="30" value="VICE CITY · EST. 2026">
+      </label>
+      <div class="field">
+        <span class="field-label">Heat</span>
+        <div class="heat" id="heatStars" aria-label="Heat stars"></div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Finish</h2>
+      <label class="check"><input id="grainToggle" type="checkbox" checked> Film grain</label>
+      <label class="check"><input id="vignetteToggle" type="checkbox" checked> Vignette</label>
+      <label class="check"><input id="halftoneToggle" type="checkbox"> Halftone title band</label>
+    </section>
+
+    <section class="group">
+      <h2>History</h2>
+      <div class="row">
+        <button id="undoBtn" type="button" class="ghost">Undo</button>
+        <button id="redoBtn" type="button" class="ghost">Redo</button>
+        <button id="randomBtn" type="button" class="ghost">Shuffle crops</button>
+      </div>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="stage-top">
+      <div class="panel-info" id="panelInfo">Panel 1 selected — drag to pan, scroll to zoom</div>
+      <div class="zoom-box">
+        <label for="zoomRange">Panel zoom</label>
+        <input id="zoomRange" type="range" min="1" max="4" step="0.01" value="1">
+        <span id="zoomVal">1.00x</span>
+      </div>
+    </div>
+
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="coverCanvas" width="1080" height="1350" aria-label="Cover preview"></canvas>
+    </div>
+
+    <section class="strip">
+      <div class="strip-head">
+        <h2>Photos</h2>
+        <div class="row">
+          <label class="file-btn">Add photos
+            <input id="photoInput" type="file" accept="image/*" multiple hidden>
+          </label>
+          <button id="samplePierBtn" type="button" class="ghost">Sample: Pier</button>
+          <button id="sampleBlvdBtn" type="button" class="ghost">Sample: Boulevard</button>
+        </div>
+      </div>
+      <div class="photo-strip" id="photoStrip"></div>
+      <div class="row wrap">
+        <button id="assignBtn" type="button">Put photo in selected panel</button>
+        <button id="fillBtn" type="button" class="ghost">Fill all panels with this photo</button>
+        <button id="altBtn" type="button" class="ghost">Alternate photos across panels</button>
+      </div>
+    </section>
+
+    <section class="export-bar">
+      <div class="size-list" id="sizeList" aria-label="Export size"></div>
+      <button id="exportBtn" type="button" class="export">Export PNG</button>
+      <p class="status" id="status" role="status"></p>
+    </section>
+  </main>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
