@@ -10,18 +10,23 @@ import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
 
 const repoRoot = dirname(fileURLToPath(import.meta.url));
-const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? join(repoRoot, 'output');
+const outDir = process.env.MAKEFUN_OUTPUT_DIR?.trim() || join(repoRoot, 'output');
 
-mkdirSync(outDir, { recursive: true });
-cpSync(join(repoRoot, 'app'), join(outDir, 'app'), { recursive: true });
-cpSync(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
+try {
+  mkdirSync(outDir, { recursive: true });
+  cpSync(join(repoRoot, 'app'), join(outDir, 'app'), { recursive: true });
+  cpSync(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
 
-const dossier = buildDossier(outDir, {
-  text_max_bytes: 163840,
-  screenshots: { max: 4, max_bytes: 262144 },
-  app_max_files: 993,
-  app_max_bytes: 50331648,
-});
+  const dossier = buildDossier(outDir, {
+    text_max_bytes: 163840,
+    screenshots: { max: 4, max_bytes: 262144 },
+    app_max_files: 993,
+    app_max_bytes: 50331648,
+  });
 
-writeFileSync(join(outDir, 'dossier.json'), dossier);
-console.log(`VICE PANELS handed in: ${join(outDir, 'dossier.json')} (${dossier.length} bytes)`);
+  writeFileSync(join(outDir, 'dossier.json'), dossier);
+  console.log(`VICE PANELS handed in: ${join(outDir, 'dossier.json')} (${dossier.length} bytes)`);
+} catch (err) {
+  console.error(`VICE PANELS hand-in failed: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+}
